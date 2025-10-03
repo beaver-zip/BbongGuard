@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BbongGuard</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🛡️ BbongGuard</h1>
+      <p class="subtitle">YouTube 가짜뉴스 탐지기</p>
+    </header>
+
+    <main id="content">
+      <!-- Initial State -->
+      <div id="initial-state" class="state">
+        <p>YouTube 영상 페이지에서 이 확장프로그램을 실행하세요.</p>
+        <button id="analyze-btn" class="btn btn-primary">영상 분석하기</button>
+      </div>
+
+      <!-- Loading State -->
+      <div id="loading-state" class="state hidden">
+        <div class="loading-spinner"></div>
+        <p>영상을 분석 중입니다...</p>
+        <p class="loading-detail">YouTube 데이터 수집 중</p>
+      </div>
+
+      <!-- Result State -->
+      <div id="result-state" class="state hidden">
+        <div class="result-header">
+          <h2>분석 결과</h2>
+        </div>
+
+        <div class="probability-section">
+          <div class="probability-label">가짜뉴스 확률</div>
+          <div class="probability-bar">
+            <div id="probability-fill" class="probability-fill"></div>
+          </div>
+          <div id="probability-text" class="probability-text">0%</div>
+        </div>
+
+        <div class="evidence-section">
+          <h3>판단 근거</h3>
+          <ul id="evidence-list" class="evidence-list">
+            <!-- 동적으로 추가될 근거 항목들 -->
+          </ul>
+        </div>
+
+        <div class="video-info">
+          <h3>분석된 영상 정보</h3>
+          <div id="video-details" class="video-details">
+            <!-- 동적으로 추가될 영상 정보 -->
+          </div>
+        </div>
+
+        <button id="reanalyze-btn" class="btn btn-secondary">다시 분석하기</button>
+      </div>
+
+      <!-- Error State -->
+      <div id="error-state" class="state hidden">
+        <div class="error-icon">⚠️</div>
+        <h3>오류가 발생했습니다</h3>
+        <p id="error-message" class="error-message"></p>
+        <button id="retry-btn" class="btn btn-primary">다시 시도</button>
+      </div>
+    </main>
+
+    <footer>
+      <p class="footer-text">AI 기반 분석 결과는 참고용입니다</p>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
