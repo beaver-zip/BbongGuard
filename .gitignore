@@ -38,3 +38,7 @@ node_modules/
 # Build
 dist/
 build/
+
+# AI Models (too large for GitHub)
+server/models/*.h5
+server/models/*.model

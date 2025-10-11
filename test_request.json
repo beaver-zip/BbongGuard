@@ -1,0 +1,15 @@
+{
+  "videoId": "test123",
+  "title": "This is a test video about technology",
+  "description": "A comprehensive guide to understanding artificial intelligence",
+  "comments": [
+    "Great video!",
+    "Very informative"
+  ],
+  "relatedVideos": [
+    {
+      "title": "Related video 1",
+      "description": "More information about AI"
+    }
+  ]
+}
