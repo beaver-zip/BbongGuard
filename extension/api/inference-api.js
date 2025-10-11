@@ -24,15 +24,22 @@ async function analyzeWithInferenceServer(videoData) {
     const payload = {
       videoId: videoData.videoId,
       title: videoData.title,
-      description: videoData.description,
+      description: videoData.description || "",
       channelTitle: videoData.channelTitle,
-      channelId: videoData.channelId,
-      publishedAt: videoData.publishedAt,
-      viewCount: videoData.viewCount,
-      likeCount: videoData.likeCount,
+      views: parseInt(videoData.viewCount) || 0,  // viewCount → views, 정수 변환
+      likes: parseInt(videoData.likeCount) || 0,  // likeCount → likes, 정수 변환
       thumbnailUrl: videoData.thumbnailUrl,
-      comments: videoData.comments?.slice(0, 100) || [], // 최대 100개 댓글
-      relatedVideos: videoData.relatedVideos || [],
+      // 댓글 객체 배열을 문자열 배열로 변환
+      comments: (videoData.comments || []).map(comment =>
+        typeof comment === 'string' ? comment : comment.text
+      ).slice(0, 100),  // 최대 100개
+      relatedVideos: (videoData.relatedVideos || []).map(video => ({
+        videoId: video.videoId,
+        title: video.title || "",
+        description: video.description || "",
+        channelTitle: video.channelTitle || null,
+        thumbnailUrl: video.thumbnailUrl || null
+      })),
       tags: videoData.tags || []
     };
 

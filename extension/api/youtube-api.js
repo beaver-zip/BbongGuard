@@ -12,7 +12,7 @@ async function getApiKey() {
       if (result.youtubeApiKey) {
         resolve(result.youtubeApiKey);
       } else {
-        reject(new Error('YouTube API 키가 설정되지 않았습니다.'));
+        reject(new Error('YouTube API 키가 설정되지 않았습니다. 확장프로그램 설정 페이지에서 API 키를 입력해주세요.'));
       }
     });
   });
@@ -28,7 +28,19 @@ async function getVideoInfo(videoId) {
     const data = await response.json();
 
     if (!response.ok) {
-      throw new Error(data.error?.message || 'YouTube API 호출 실패');
+      const errorMessage = data.error?.message || 'YouTube API 호출 실패';
+      const errorCode = response.status;
+
+      // HTTP 상태 코드별 구체적인 메시지
+      if (errorCode === 400) {
+        throw new Error(`잘못된 요청: ${errorMessage} (API 키 형식을 확인해주세요)`);
+      } else if (errorCode === 403) {
+        throw new Error(`권한 없음: ${errorMessage} (YouTube Data API v3가 활성화되어 있는지 확인해주세요)`);
+      } else if (errorCode === 429) {
+        throw new Error(`할당량 초과: 일일 YouTube API 할당량을 초과했습니다`);
+      } else {
+        throw new Error(`YouTube API 오류 (${errorCode}): ${errorMessage}`);
+      }
     }
 
     if (!data.items || data.items.length === 0) {
@@ -58,7 +70,7 @@ async function getVideoInfo(videoId) {
 }
 
 // 댓글 가져오기
-async function getVideoComments(videoId, maxResults = 50) {
+async function getVideoComments(videoId, maxResults = 20) {
   try {
     const apiKey = await getApiKey();
     const url = `${YOUTUBE_API_BASE_URL}/commentThreads?part=snippet&videoId=${videoId}&maxResults=${maxResults}&order=relevance&key=${apiKey}`;
@@ -88,7 +100,7 @@ async function getVideoComments(videoId, maxResults = 50) {
 }
 
 // 관련 영상 가져오기
-async function getRelatedVideos(videoId, maxResults = 10) {
+async function getRelatedVideos(videoId, maxResults = 9) {
   try {
     const apiKey = await getApiKey();
     const url = `${YOUTUBE_API_BASE_URL}/search?part=snippet&relatedToVideoId=${videoId}&type=video&maxResults=${maxResults}&key=${apiKey}`;
@@ -104,6 +116,7 @@ async function getRelatedVideos(videoId, maxResults = 10) {
     const relatedVideos = data.items?.map(item => ({
       videoId: item.id.videoId,
       title: item.snippet.title,
+      description: item.snippet.description || "",
       channelTitle: item.snippet.channelTitle,
       thumbnailUrl: item.snippet.thumbnails.default.url
     })) || [];

@@ -34,13 +34,15 @@ function updateLoadingMessage(message) {
 function showError(message) {
   const errorMessage = document.getElementById('error-message');
   errorMessage.textContent = message;
+  console.error('BbongGuard 에러:', message); // 콘솔에도 출력
   showState('error');
 }
 
 // 결과 표시
 function showResult(data) {
-  // 가짜뉴스 확률 표시
-  const probability = data.fakeProbability || 0;
+  // 가짜뉴스 확률 표시 (0~1 범위를 0~100%로 변환)
+  const probabilityRaw = data.fakeProbability || 0;
+  const probability = probabilityRaw * 100;  // 0.7838 → 78.38
   const probabilityFill = document.getElementById('probability-fill');
   const probabilityText = document.getElementById('probability-text');
 
@@ -98,7 +100,26 @@ async function analyzeVideo() {
     }
 
     // Content script에 메시지 전송하여 video ID 가져오기
-    const response = await chrome.tabs.sendMessage(tab.id, { action: 'getVideoId' });
+    let response;
+    try {
+      response = await chrome.tabs.sendMessage(tab.id, { action: 'getVideoId' });
+    } catch (error) {
+      // Content Script 연결 실패 - 프로그래밍 방식으로 재주입 시도
+      console.log('Content Script 연결 실패, 재주입 시도...');
+
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          files: ['content/content.js']
+        });
+
+        // 재주입 후 재시도
+        await new Promise(resolve => setTimeout(resolve, 100)); // 100ms 대기
+        response = await chrome.tabs.sendMessage(tab.id, { action: 'getVideoId' });
+      } catch (reinjectError) {
+        throw new Error('확장프로그램과 페이지 연결에 실패했습니다. 페이지를 새로고침한 후 다시 시도해주세요.');
+      }
+    }
 
     if (!response || !response.videoId) {
       throw new Error('영상 ID를 가져올 수 없습니다.');

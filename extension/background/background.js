@@ -68,7 +68,7 @@ async function fetchYouTubeData(videoId) {
 
   } catch (error) {
     console.error('YouTube 데이터 수집 실패:', error);
-    throw new Error('YouTube 데이터를 가져오는 데 실패했습니다.');
+    throw new Error(`YouTube 데이터 수집 실패: ${error.message}`);
   }
 }
 
@@ -80,7 +80,7 @@ async function sendToInferenceServer(videoData) {
 
   } catch (error) {
     console.error('추론 서버 통신 실패:', error);
-    throw new Error('AI 분석에 실패했습니다.');
+    throw new Error(`AI 분석 실패: ${error.message}`);
   }
 }
 
