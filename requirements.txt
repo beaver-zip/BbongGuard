@@ -12,3 +12,13 @@ requests==2.32.3
 
 # 데이터 처리
 pydantic==2.10.2
+
+# 딥러닝 및 ML
+tensorflow>=2.10.0
+gensim>=4.3.0
+nltk>=3.8
+numpy>=1.23.0
+scikit-learn>=1.2.0
+
+# Google API (YouTube Data API)
+google-api-python-client>=2.0.0
