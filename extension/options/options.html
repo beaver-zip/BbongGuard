@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BbongGuard 설정</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🛡️ BbongGuard 설정</h1>
+      <p class="subtitle">YouTube 가짜뉴스 탐지기</p>
+    </header>
+
+    <main>
+      <div class="settings-card">
+        <h2>API 설정</h2>
+        <p class="description">
+          확장프로그램이 정상적으로 작동하려면 YouTube Data API v3 키가 필요합니다.
+        </p>
+
+        <form id="settings-form">
+          <div class="form-group">
+            <label for="youtube-api-key">
+              YouTube Data API v3 키
+              <span class="required">*</span>
+            </label>
+            <input
+              type="text"
+              id="youtube-api-key"
+              name="youtubeApiKey"
+              placeholder="AIzaSyA..."
+              required
+            />
+            <p class="hint">
+              <a href="https://console.cloud.google.com/" target="_blank">Google Cloud Console</a>에서 발급받을 수 있습니다.
+            </p>
+          </div>
+
+          <div class="form-group">
+            <label for="inference-server-url">
+              추론 서버 URL
+            </label>
+            <input
+              type="url"
+              id="inference-server-url"
+              name="inferenceServerUrl"
+              placeholder="http://localhost:8000"
+              value="http://localhost:8000"
+            />
+            <p class="hint">
+              로컬 추론 서버의 주소를 입력하세요. (기본값: http://localhost:8000)
+            </p>
+          </div>
+
+          <div class="button-group">
+            <button type="submit" class="btn btn-primary">
+              저장
+            </button>
+            <button type="button" id="test-btn" class="btn btn-secondary">
+              API 키 테스트
+            </button>
+          </div>
+        </form>
+
+        <!-- Status Messages -->
+        <div id="status-message" class="status-message hidden">
+          <span id="status-icon"></span>
+          <span id="status-text"></span>
+        </div>
+      </div>
+
+      <!-- Instructions Card -->
+      <div class="info-card">
+        <h3>📖 API 키 발급 방법</h3>
+        <ol>
+          <li><a href="https://console.cloud.google.com/" target="_blank">Google Cloud Console</a>에 접속합니다</li>
+          <li>새 프로젝트를 생성하거나 기존 프로젝트를 선택합니다</li>
+          <li>"API 및 서비스" > "라이브러리"로 이동합니다</li>
+          <li>"YouTube Data API v3"를 검색하고 사용 설정합니다</li>
+          <li>"사용자 인증 정보" > "사용자 인증 정보 만들기" > "API 키"를 선택합니다</li>
+          <li>생성된 API 키를 복사하여 위 입력란에 붙여넣습니다</li>
+        </ol>
+      </div>
+
+      <!-- Quota Info Card -->
+      <div class="info-card">
+        <h3>⚠️ API 할당량 안내</h3>
+        <p>
+          YouTube Data API v3는 일일 10,000 units의 무료 할당량을 제공합니다.
+        </p>
+        <ul>
+          <li><strong>videos.list</strong>: 1 unit (영상 정보)</li>
+          <li><strong>commentThreads.list</strong>: 1 unit (댓글 20개)</li>
+          <li><strong>search.list</strong>: 100 units (관련 영상 9개)</li>
+        </ul>
+        <p>
+          영상 1개 분석 시 약 <strong>102 units</strong>가 소모되므로,
+          하루에 약 98개의 영상을 분석할 수 있습니다.
+        </p>
+      </div>
+    </main>
+
+    <footer>
+      <p class="footer-text">
+        BbongGuard v1.0.0 |
+        <a href="https://github.com/beaver-zip/BbongGuard" target="_blank">GitHub</a>
+      </p>
+    </footer>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>
