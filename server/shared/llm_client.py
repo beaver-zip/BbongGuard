@@ -1,0 +1,267 @@
+"""
+OpenAI LLM 클라이언트
+GPT-4o를 사용한 비동기 호출
+"""
+
+import logging
+import json
+from typing import Dict, Any, Optional, List
+from openai import AsyncOpenAI
+import asyncio
+
+from ..config import Config
+
+logger = logging.getLogger(__name__)
+
+
+class LLMClient:
+    """OpenAI GPT-4o 비동기 클라이언트"""
+
+    def __init__(self):
+        """OpenAI 클라이언트 초기화"""
+        if not Config.OPENAI_API_KEY:
+            raise ValueError("OPENAI_API_KEY가 설정되지 않았습니다")
+
+        self.client = AsyncOpenAI(api_key=Config.OPENAI_API_KEY)
+        self.model = Config.LLM_MODEL
+        self.temperature = Config.LLM_TEMPERATURE
+        self.max_tokens = Config.LLM_MAX_TOKENS
+
+        logger.info(f"LLMClient 초기화 완료 - 모델: {self.model}")
+
+    async def chat_completion(
+        self,
+        messages: List[Dict[str, str]],
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        response_format: Optional[Dict] = None
+    ) -> str:
+        """
+        채팅 완성 API 호출
+
+        Args:
+            messages: 메시지 목록 [{"role": "user", "content": "..."}]
+            temperature: 샘플링 온도 (기본값: Config.LLM_TEMPERATURE)
+            max_tokens: 최대 토큰 수 (기본값: Config.LLM_MAX_TOKENS)
+            response_format: 응답 형식 (예: {"type": "json_object"})
+
+        Returns:
+            LLM 응답 텍스트
+        """
+        try:
+            params = {
+                "model": self.model,
+                "messages": messages,
+                "temperature": temperature if temperature is not None else self.temperature,
+                "max_tokens": max_tokens if max_tokens is not None else self.max_tokens
+            }
+
+            if response_format:
+                params["response_format"] = response_format
+
+            response = await self.client.chat.completions.create(**params)
+
+            content = response.choices[0].message.content
+            logger.debug(f"LLM 응답: {content[:100]}...")
+
+            return content
+
+        except Exception as e:
+            logger.error(f"LLM API 호출 실패: {e}")
+            raise
+
+    async def chat_completion_json(
+        self,
+        messages: List[Dict[str, str]],
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        JSON 형식 응답을 요청하는 채팅 완성
+
+        Args:
+            messages: 메시지 목록
+            temperature: 샘플링 온도
+            max_tokens: 최대 토큰 수
+
+        Returns:
+            파싱된 JSON 객체
+        """
+        response_text = await self.chat_completion(
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            response_format={"type": "json_object"}
+        )
+
+        try:
+            return json.loads(response_text)
+        except json.JSONDecodeError as e:
+            logger.error(f"LLM JSON 응답 파싱 실패: {e}\n응답: {response_text}")
+            raise ValueError(f"JSON 파싱 실패: {e}")
+
+    async def extract_claims(
+        self,
+        title: str,
+        description: str,
+        comments: List[str],
+        transcript: str = None,
+        max_claims: int = 5
+    ) -> List[Dict[str, Any]]:
+        """
+        텍스트에서 팩트체킹이 필요한 주장 추출
+
+        Args:
+            title: 영상 제목
+            description: 영상 설명
+            comments: 댓글 목록
+            transcript: 영상 스크립트 (자막)
+            max_claims: 최대 추출할 주장 수
+
+        Returns:
+            주장 목록 [{"claim": "...", "category": "...", "importance": "...", "keywords": [...]}]
+        """
+        # 모든 댓글 사용 (이미 Config.RAG_MAX_COMMENTS 개수만큼만 수집됨)
+        top_comments = '\n'.join(comments) if comments else "댓글 없음"
+
+        # 스크립트가 너무 길면 앞부분만 사용 (토큰 제한)
+        script_text = ""
+        if transcript:
+            max_script_length = 50000  # 약 12.5k 토큰 (GPT-4o는 충분히 처리 가능)
+            if len(transcript) > max_script_length:
+                script_text = transcript[:max_script_length] + "...(중략)"
+            else:
+                script_text = transcript
+        else:
+            script_text = "자막 없음"
+
+        prompt = f"""다음 YouTube 영상의 텍스트에서 팩트체킹이 필요한 구체적인 주장들을 추출하세요.
+
+영상 제목: {title}
+
+영상 설명:
+{description}
+
+영상 스크립트 (자막):
+{script_text}
+
+주요 댓글:
+{top_comments}
+
+추출 조건:
+1. **검증 가치**: 단순한 사실 나열보다는, 논란의 여지가 있거나 대중에게 잘못된 정보를 줄 수 있는 주장을 우선하세요.
+2. **구체성**: "경제가 나쁘다" 같은 모호한 주장보다는 "2023년 경제성장률이 -1%다" 같은 구체적인 수치/사건이 포함된 주장을 추출하세요.
+3. **핵심 내용**: 영상의 핵심 주제와 관련된 주장을 우선하세요.
+4. 중요도 높은 순서로 최대 {max_claims}개
+
+출력 형식 (JSON):
+{{
+  "claims": [
+    {{
+      "claim": "구체적인 주장 내용 (주어와 술어가 명확한 완결된 문장)",
+      "category": "정치|경제|사회|과학|건강|IT|국제|문화|역사|기타",
+      "importance": "high|medium|low"
+    }}
+  ]
+}}
+
+주의: 반드시 JSON 형식으로만 응답하세요."""
+
+
+
+        messages = [{"role": "user", "content": prompt}]
+
+        try:
+            result = await self.chat_completion_json(messages)
+            claims = result.get('claims', [])
+            logger.info(f"주장 추출 완료: {len(claims)}개")
+            return claims
+        except Exception as e:
+            logger.error(f"주장 추출 실패: {e}")
+            return []
+
+    async def judge_claim(
+        self,
+        claim: str,
+        evidence_list: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """
+        주장을 증거 기반으로 판정 (Binary: 가짜 vs 사실)
+
+        Args:
+            claim: 판정할 주장
+            evidence_list: 증거 목록 [{"source_title": "...", "snippet": "...", ...}]
+
+        Returns:
+            판정 결과 {"is_fake": bool, "reason": "..."}
+        """
+        # Evidence 포맷팅 (출처 강조)
+        evidence_text = ""
+        for i, ev in enumerate(evidence_list, 1):
+            domain = ev.get('domain', 'Unknown')
+            source_title = ev.get('source_title', 'Unknown')
+            snippet = ev.get('snippet', 'N/A')
+
+            evidence_text += f"\n{i}. [{domain}] {source_title}\n"
+            evidence_text += f"   내용: {snippet}\n"
+
+        if not evidence_list:
+            evidence_text = "\n[증거 없음] 신뢰할 수 있는 출처에서 관련 정보를 찾을 수 없습니다."
+
+        prompt = f"""당신은 팩트체커입니다. 주장과 증거들을 보고 가짜뉴스 여부를 판단하세요.
+
+주장: "{claim}"
+
+수집된 증거:
+{evidence_text}
+
+판단 기준:
+1. 증거의 출처가 신뢰할 만한가? (언론사, 공식 기관 등)
+2. 주장과 증거 내용이 일치하는가?
+3. 증거들이 일관되게 주장을 뒷받침하거나 반박하는가?
+
+출력 형식 (JSON):
+{{
+  "is_fake": false,  // true: 가짜, false: 사실
+  "reason": "판정 이유를 한 문장으로 요약. 어떤 출처에서 어떻게 확인했는지 명시."
+}}
+
+주의사항:
+- 증거가 없으면 is_fake: true (검증 불가능한 주장은 가짜로 간주)
+- 증거가 주장을 뒷받침하면 is_fake: false
+- 증거가 주장과 상충하면 is_fake: true
+- reason은 사용자가 이해하기 쉽게 작성하세요."""
+
+        messages = [{"role": "user", "content": prompt}]
+
+        try:
+            result = await self.chat_completion_json(messages)
+            is_fake = result.get('is_fake', True)
+            reason = result.get('reason', '판정 이유 없음')
+
+            logger.info(f"주장 판정 완료: {claim[:50]}... -> {'가짜' if is_fake else '사실'}")
+            return {
+                "is_fake": is_fake,
+                "reason": reason
+            }
+        except Exception as e:
+            logger.error(f"주장 판정 실패: {e}")
+            # 실패 시 기본값 (안전하게 가짜로 판정)
+            return {
+                "is_fake": True,
+                "reason": f"판정 중 오류 발생: {str(e)}"
+            }
+
+
+# 싱글톤 인스턴스
+_llm_client_instance: Optional[LLMClient] = None
+
+
+async def get_llm_client() -> LLMClient:
+    """LLMClient 싱글톤 인스턴스 반환"""
+    global _llm_client_instance
+
+    if _llm_client_instance is None:
+        _llm_client_instance = LLMClient()
+
+    return _llm_client_instance
