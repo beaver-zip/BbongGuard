@@ -42,3 +42,9 @@ build/
 # AI Models (too large for GitHub)
 server/models/*.h5
 server/models/*.model
+
+# User requested exclusions
+logs/
+test_multimodal.py
+quick_test.py
+BbongGuard_v2/

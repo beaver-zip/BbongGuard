@@ -42,7 +42,7 @@ BbongGuard/
 │       └── doc2vec.model    # Doc2Vec 모델 (13MB)
 │
 ├── .env                       # 환경 변수
-├── .gitignore                 # Git ignore (모델 파일 제외)
+├── .gitignore                 # Git ignore
 ├── .venv/                     # Python 가상환경
 └── requirements.txt           # Python 의존성
 ```
@@ -58,12 +58,7 @@ cd BbongGuard
 
 ### 2. 환경 변수 설정
 
-`.env` 파일에 YouTube API 키를 추가하세요:
-
-```env
-YOUTUBE_API_KEY=your_api_key_here
-INFERENCE_SERVER_URL=http://localhost:8000
-```
+`.env` 파일에 YouTube API 키를 추가하세요.
 
 **YouTube API 키 발급 방법:**
 1. [Google Cloud Console](https://console.cloud.google.com/)에 접속
@@ -81,25 +76,16 @@ INFERENCE_SERVER_URL=http://localhost:8000
 
 ### 4. 확장프로그램에 API 키 설정
 
-확장프로그램이 로드되면, 다음 중 하나의 방법으로 API 키를 설정해야 합니다:
-
-**방법 1: 설정 페이지 사용 (권장)**
 1. Chrome 브라우저에서 `chrome://extensions/` 접속
 2. BbongGuard 확장프로그램 찾기
 3. "확장 프로그램 옵션" 또는 "세부정보" 클릭
 4. 설정 페이지에서 API 키 입력 및 저장
 5. "API 키 테스트" 버튼으로 정상 작동 확인
 
-**방법 2: Chrome DevTools Console 사용**
-1. 확장프로그램 아이콘 우클릭 > "검사" (또는 팝업 열기)
-2. DevTools Console에서 다음 명령 실행:
-```javascript
-chrome.storage.local.set({ youtubeApiKey: 'YOUR_API_KEY_HERE' });
-```
-
 ## 🐍 Python 백엔드 (추론 서버)
 
-FastAPI 기반 추론 서버가 구현되어 있습니다. OR-TDC 모델 (Original + Related + Title + Description + Comments)을 사용하여 YouTube 영상의 가짜뉴스 여부를 판정합니다.
+FastAPI 기반 추론 서버가 구현되어 있습니다. 
+OR-TDC 모델 (Original + Related + Title + Description + Comments)을 사용하여 YouTube 영상의 가짜뉴스 여부를 판정합니다.
 
 ### 모델 정보
 
@@ -244,20 +230,15 @@ YouTube Data API v3는 일일 10,000 units의 무료 할당량을 제공합니�
 ## ⚠️ 주의사항
 
 1. **API 키 보안**: Chrome 확장프로그램에 API 키를 직접 포함하면 노출 위험이 있습니다. 실제 배포 시에는 백엔드 프록시 서버를 통해 API를 호출하는 것을 권장합니다.
-
 2. **할당량 제한**: YouTube API 무료 할당량을 초과하지 않도록 주의하세요.
-
 3. **분석 결과**: AI 분석 결과는 참고용이며, 100% 정확하지 않을 수 있습니다.
 
 ## 📝 TODO
 
-- [x] Extension과 Server 디렉토리 분리
-- [x] .gitignore에 모델 파일 추가 (GitHub 업로드 방지)
-- [x] 옵션 페이지 추가 (API 키 설정 UI)
+- [ ] 추론 모델 개선
 - [ ] 백엔드 프록시 서버 구현 (API 키 보안)
 - [ ] 분석 결과 캐싱
-- [ ] 테스트 코드 작성
-- [ ] 모델 성능 개선 및 재학습
+- [ ] 테스트 코드 
 - [ ] 배치 추론 지원 (여러 영상 동시 분석)
 
 ## 📄 라이선스

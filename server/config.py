@@ -18,33 +18,6 @@ class Config:
 
     # 경로 설정
     BASE_DIR = Path(__file__).parent
-    MODEL_DIR = BASE_DIR / "models"
-
-    # 모델 파일 경로
-    DOC2VEC_MODEL_PATH = MODEL_DIR / "doc2vec.model"
-    CNN_MODEL_PATH = MODEL_DIR / "OR-TDC.h5"
-
-    # Doc2Vec 설정
-    DOC2VEC_VECTOR_SIZE = 100
-
-    # 모델 설정
-    MODEL_TYPE = "OR-TDC"  # Original + Related + Title + Description + Comments
-    USE_RELATED_VIDEOS = True
-    NUM_RELATED_VIDEOS = 9
-
-    # 텍스트 조합 설정
-    TEXT_COMBINATIONS = {
-        'T': ['title'],
-        'D': ['description'],
-        'C': ['comment'],
-        'TD': ['title', 'description'],
-        'TC': ['title', 'comment'],
-        'DC': ['description', 'comment'],
-        'TDC': ['title', 'description', 'comment']
-    }
-
-    # 현재 모델의 텍스트 조합
-    CURRENT_TEXT_COMBINATION = 'TDC'
 
     # CORS 설정 (Chrome Extension 연동을 위해)
     CORS_ORIGINS = [
@@ -56,22 +29,50 @@ class Config:
     # YouTube API 설정 (옵션 - 필요시 서버에서도 데이터 수집 가능)
     YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "")
 
+    # WebShare 프록시 설정 (자막 IP 차단 우회용)
+    WEBSHARE_PROXY_USERNAME = os.getenv("WEBSHARE_PROXY_USERNAME", "")
+    WEBSHARE_PROXY_PASSWORD = os.getenv("WEBSHARE_PROXY_PASSWORD", "")
+
+    # RAG 시스템 설정
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+    TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
+
+    # RAG 파라미터
+    RAG_MAX_CLAIMS = int(os.getenv("RAG_MAX_CLAIMS", "5"))
+    RAG_MAX_COMMENTS = int(os.getenv("RAG_MAX_COMMENTS", "10"))  # 댓글 수집 및 사용 개수
+    RAG_MAX_SEARCH_RESULTS = int(os.getenv("RAG_MAX_SEARCH_RESULTS", "10"))
+    RAG_TOP_EVIDENCE = int(os.getenv("RAG_TOP_EVIDENCE", "5"))
+    RAG_ENABLE_CACHING = os.getenv("RAG_ENABLE_CACHING", "true").lower() == "true"
+
+    # ChromaDB 설정
+    CHROMADB_DIR = BASE_DIR / "data" / "chromadb"
+    CHROMADB_COLLECTION_NAME = "evidence_store"
+
+    # LLM 설정
+    LLM_MODEL = "gpt-4o"
+    LLM_TEMPERATURE = 0.1  # 낮을수록 일관성 있는 답변
+    LLM_MAX_TOKENS = 2000
+
+    # 출처 리스트 경로
+    SOURCE_LISTS_DIR = BASE_DIR / "data" / "source_lists"
+    WHITELIST_PATH = SOURCE_LISTS_DIR / "whitelist.json"
+    BLACKLIST_PATH = SOURCE_LISTS_DIR / "blacklist.json"
+
     @classmethod
-    def validate(cls):
-        """설정 검증"""
+    def validate_rag(cls):
+        """RAG 설정 검증"""
         errors = []
 
-        # 모델 디렉토리 확인
-        if not cls.MODEL_DIR.exists():
-            errors.append(f"모델 디렉토리가 존재하지 않습니다: {cls.MODEL_DIR}")
+        # API 키 확인
+        if not cls.OPENAI_API_KEY:
+            errors.append("OPENAI_API_KEY가 설정되지 않았습니다")
 
-        # Doc2Vec 모델 파일 확인
-        if not cls.DOC2VEC_MODEL_PATH.exists():
-            errors.append(f"Doc2Vec 모델 파일이 없습니다: {cls.DOC2VEC_MODEL_PATH}")
+        if not cls.TAVILY_API_KEY:
+            errors.append("TAVILY_API_KEY가 설정되지 않았습니다")
 
-        # CNN 모델 파일 확인
-        if not cls.CNN_MODEL_PATH.exists():
-            errors.append(f"CNN 모델 파일이 없습니다: {cls.CNN_MODEL_PATH}")
+        # 출처 리스트 디렉토리 확인
+        if not cls.SOURCE_LISTS_DIR.exists():
+            errors.append(f"출처 리스트 디렉토리가 없습니다: {cls.SOURCE_LISTS_DIR}")
 
         return errors
 
@@ -79,13 +80,12 @@ class Config:
     def print_config(cls):
         """설정 출력"""
         print("="*70)
-        print("BbongGuard 추론 서버 설정")
+        print("BbongGuard RAG 서버 설정")
         print("="*70)
         print(f"서버 주소: {cls.HOST}:{cls.PORT}")
-        print(f"모델 디렉토리: {cls.MODEL_DIR}")
-        print(f"Doc2Vec 모델: {cls.DOC2VEC_MODEL_PATH}")
-        print(f"CNN 모델: {cls.CNN_MODEL_PATH}")
-        print(f"모델 타입: {cls.MODEL_TYPE}")
-        print(f"텍스트 조합: {cls.CURRENT_TEXT_COMBINATION}")
-        print(f"관련 영상 사용: {cls.USE_RELATED_VIDEOS} (최대 {cls.NUM_RELATED_VIDEOS}개)")
+        print(f"LLM 모델: {cls.LLM_MODEL}")
+        print(f"최대 주장 수: {cls.RAG_MAX_CLAIMS}")
+        print(f"댓글 수집/사용: {cls.RAG_MAX_COMMENTS}개")
+        print(f"검색 결과: {cls.RAG_MAX_SEARCH_RESULTS}개")
+        print(f"Evidence: 상위 {cls.RAG_TOP_EVIDENCE}개")
         print("="*70)
