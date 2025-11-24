@@ -82,13 +82,19 @@ class ImageAnalyzer:
                 # [Branch B] 텍스트 없음 -> 시각적 자극성만 분석 (Vision API)
                 logger.info("화면 텍스트 없음: 시각적 자극성 분석 수행 (Vision API)")
                 
-                # Base64 이미지 변환
+                # CLIP 임베딩을 사용하여 Claim과 가장 관련성 높은 프레임 3장 선택
+                # (단순히 앞 3장이 아니라, 의미적으로 중요한 프레임을 선별하여 비용/성능 최적화)
+                selected_indices = self._select_top_frames(embeddings, request.claims)
+                
+                # Base64 이미지 변환 (선택된 프레임만)
                 import base64
                 import cv2
                 base64_images = []
-                for f in frames:
+                
+                for idx in selected_indices:
+                    frame = frames[idx]
                     # 이미지를 JPG로 인코딩
-                    _, buffer = cv2.imencode('.jpg', f['image'])
+                    _, buffer = cv2.imencode('.jpg', frame['image'])
                     b64 = base64.b64encode(buffer).decode('utf-8')
                     base64_images.append(b64)
                 
@@ -128,6 +134,50 @@ class ImageAnalyzer:
                 status="error",
                 error_message=str(e)
             )
+
+    def _select_top_frames(self, frame_embeddings: List[Any], claims: List[Claim], top_k: int = 3) -> List[int]:
+        """
+        Claim과 가장 유사도가 높은 프레임의 인덱스를 반환합니다.
+        """
+        import numpy as np
+        from sklearn.metrics.pairwise import cosine_similarity
+        
+        if not frame_embeddings or not claims:
+            return list(range(min(len(frame_embeddings), top_k)))
+            
+        try:
+            # Claim 텍스트 임베딩
+            claim_texts = [c.claim_text for c in claims]
+            claim_embeddings = self.extractor.encode_text(claim_texts)
+            
+            if len(claim_embeddings) == 0:
+                return list(range(min(len(frame_embeddings), top_k)))
+                
+            # 코사인 유사도 계산 (Frames x Claims)
+            # frame_embeddings가 리스트라면 numpy array로 변환
+            frame_embs_np = np.array(frame_embeddings)
+            
+            # 유사도 매트릭스: [num_frames, num_claims]
+            similarities = cosine_similarity(frame_embs_np, claim_embeddings)
+            
+            # 각 프레임별로 가장 높은 유사도(Max Similarity)를 구함 (어떤 Claim이든 가장 관련성 높은 것)
+            # [num_frames]
+            max_similarities = np.max(similarities, axis=1)
+            
+            # 유사도 순으로 정렬하여 상위 K개 인덱스 추출
+            # argsort는 오름차순이므로 뒤집어서 상위권 선택
+            top_indices = np.argsort(max_similarities)[::-1][:top_k]
+            
+            # 시간 순서대로 정렬 (영상의 흐름 유지를 위해)
+            top_indices.sort()
+            
+            logger.info(f"프레임 선별 완료: {top_indices} (유사도 기반)")
+            return top_indices.tolist()
+            
+        except Exception as e:
+            logger.error(f"프레임 선별 중 오류: {e}")
+            # 오류 시 앞부분 반환
+            return list(range(min(len(frame_embeddings), top_k)))
 
     async def _analyze_provocation(self, ocr_text: str, claims: List[Claim]) -> Dict[str, Any]:
         """

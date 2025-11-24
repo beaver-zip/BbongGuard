@@ -84,6 +84,20 @@ class ImageFeatureExtractor:
         
         return ocr_texts
 
+    def encode_text(self, texts: List[str]) -> np.ndarray:
+        """
+        텍스트 리스트를 CLIP 임베딩으로 변환합니다.
+        """
+        if not texts:
+            return np.array([])
+            
+        try:
+            embeddings = self.clip_model.encode(texts, batch_size=32, convert_to_numpy=True)
+            return embeddings
+        except Exception as e:
+            logger.error(f"텍스트 임베딩 생성 실패: {e}")
+            return np.array([])
+
     def extract(self, frames: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         (Legacy) 순차적으로 특징 추출 (하위 호환성 유지)
