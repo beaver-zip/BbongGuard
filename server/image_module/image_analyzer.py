@@ -62,14 +62,37 @@ class ImageAnalyzer:
                     status="error",
                 )
 
-            # 2. 특징 추출 (OCR)
-            processed_frames = self.extractor.extract(frames)
+            # 2. 특징 추출 (병렬 처리)
+            # asyncio.to_thread를 사용하여 CPU 바운드 작업(OCR, 임베딩)을 비동기적으로 실행
+            loop = asyncio.get_running_loop()
+            
+            embedding_task = loop.run_in_executor(None, self.extractor.extract_embeddings, frames)
+            ocr_task = loop.run_in_executor(None, self.extractor.extract_ocr, frames)
+            
+            embeddings, ocr_texts = await asyncio.gather(embedding_task, ocr_task)
             
             # 3. 자극성 및 불일치 분석 (LLM)
-            ocr_texts = [f.get('ocr_text', '') for f in processed_frames if f.get('ocr_text')]
-            combined_ocr = "\n".join(ocr_texts)
+            combined_ocr = "\n".join([t for t in ocr_texts if t.strip()])
             
-            provocation_analysis = await self._analyze_provocation(combined_ocr, request.claims)
+            if combined_ocr.strip():
+                # [Branch A] 화면 내 텍스트 검출됨 -> 텍스트 기반 불일치/과장 분석
+                logger.info("화면 텍스트 검출됨: 텍스트 기반 분석 수행")
+                provocation_analysis = await self._analyze_provocation(combined_ocr, request.claims)
+            else:
+                # [Branch B] 텍스트 없음 -> 시각적 자극성만 분석 (Vision API)
+                logger.info("화면 텍스트 없음: 시각적 자극성 분석 수행 (Vision API)")
+                
+                # Base64 이미지 변환
+                import base64
+                import cv2
+                base64_images = []
+                for f in frames:
+                    # 이미지를 JPG로 인코딩
+                    _, buffer = cv2.imencode('.jpg', f['image'])
+                    b64 = base64.b64encode(buffer).decode('utf-8')
+                    base64_images.append(b64)
+                
+                provocation_analysis = await self._analyze_visual_provocation(base64_images, request.claims)
             
             # 결과 매핑
             image_claims = []
@@ -110,7 +133,7 @@ class ImageAnalyzer:
         """
         OCR 텍스트와 주장을 비교하여 자극성 및 불일치를 분석합니다.
         """
-        llm = get_llm_client()
+        llm = await get_llm_client()
         
         claim_texts = "\n".join([f"- {c.claim_text}" for c in claims])
         
@@ -137,8 +160,17 @@ class ImageAnalyzer:
         """
         
         try:
-            response = await llm.generate_json(prompt)
+            response = await llm.chat_completion_json([{"role": "user", "content": prompt}])
             return response
         except Exception as e:
             logger.error(f"자극성 분석 실패: {e}")
             return {"provocation_score": 0, "inconsistency_score": 0, "summary": "분석 실패"}
+
+    async def _analyze_visual_provocation(self, base64_images: List[str], claims: List[Claim]) -> Dict[str, Any]:
+        """
+        이미지만으로 시각적 자극성을 분석합니다.
+        """
+        llm = await get_llm_client()
+        claim_texts = [c.claim_text for c in claims]
+        
+        return await llm.analyze_visual_provocation(base64_images, claim_texts)

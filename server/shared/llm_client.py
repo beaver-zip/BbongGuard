@@ -252,6 +252,105 @@ class LLMClient:
                 "reason": f"판정 중 오류 발생: {str(e)}"
             }
 
+    async def chat_completion_image(
+        self,
+        messages: List[Dict[str, Any]],
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        response_format: Optional[Dict] = None
+    ) -> str:
+        """
+        이미지가 포함된 채팅 완성 API 호출 (GPT-4o Vision)
+
+        Args:
+            messages: 메시지 목록 (이미지 포함)
+            temperature: 샘플링 온도
+            max_tokens: 최대 토큰 수
+            response_format: 응답 형식
+
+        Returns:
+            LLM 응답 텍스트
+        """
+        try:
+            params = {
+                "model": self.model,
+                "messages": messages,
+                "temperature": temperature if temperature is not None else self.temperature,
+                "max_tokens": max_tokens if max_tokens is not None else self.max_tokens
+            }
+
+            if response_format:
+                params["response_format"] = response_format
+
+            response = await self.client.chat.completions.create(**params)
+            content = response.choices[0].message.content
+            logger.debug(f"LLM(Vision) 응답: {content[:100]}...")
+            return content
+
+        except Exception as e:
+            logger.error(f"LLM(Vision) API 호출 실패: {e}")
+            raise
+
+    async def analyze_visual_provocation(
+        self,
+        base64_images: List[str],
+        claims: List[str]
+    ) -> Dict[str, Any]:
+        """
+        이미지만으로 시각적 자극성을 분석합니다. (텍스트가 없는 경우)
+
+        Args:
+            base64_images: Base64 인코딩된 이미지 리스트
+            claims: 핵심 주장 리스트
+
+        Returns:
+            분석 결과 JSON
+        """
+        claim_texts = "\n".join([f"- {c}" for c in claims])
+        
+        # 이미지 메시지 구성 (최대 3장만 사용)
+        content = [
+            {"type": "text", "text": f"""
+            다음은 유튜브 영상의 주요 프레임입니다. 화면 내에 텍스트는 감지되지 않았습니다.
+            이 이미지들이 시청자를 자극하거나 선동하기 위해 과장된 시각적 연출(섬네일 낚시, 충격적인 합성 등)을 사용하고 있는지 분석해주세요.
+
+            [핵심 주장]
+            {claim_texts}
+
+            분석 기준:
+            1. 시각적 자극성 (Visual Provocation): 0~10점. (10: 혐오스럽거나 충격적인 이미지, 과도한 합성)
+            2. 관련성 (Relevance): 0~10점. (10: 주장과 밀접하게 관련된 이미지)
+
+            결과를 JSON 형식으로 반환해주세요:
+            {{
+                "provocation_score": int,
+                "relevance_score": int,
+                "summary": "한 줄 요약 (예: 자극적인 합성은 없으나 주장과 무관한 이미지를 사용함)"
+            }}
+            """}
+        ]
+        
+        # 이미지 추가 (최대 3장)
+        for img_b64 in base64_images[:3]:
+            content.append({
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/jpeg;base64,{img_b64}"
+                }
+            })
+
+        messages = [{"role": "user", "content": content}]
+
+        try:
+            response_text = await self.chat_completion_image(
+                messages=messages,
+                response_format={"type": "json_object"}
+            )
+            return json.loads(response_text)
+        except Exception as e:
+            logger.error(f"시각적 자극성 분석 실패: {e}")
+            return {"provocation_score": 0, "relevance_score": 0, "summary": "분석 실패"}
+
 
 # 싱글톤 인스턴스
 _llm_client_instance: Optional[LLMClient] = None

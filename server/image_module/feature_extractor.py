@@ -38,56 +38,65 @@ class ImageFeatureExtractor:
             logger.error(f"OCR 엔진 로드 실패: {e}")
             raise
 
-    def extract(self, frames: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def extract_embeddings(self, frames: List[Dict[str, Any]]) -> List[np.ndarray]:
         """
-        프레임 리스트에서 특징을 추출합니다.
-
-        Args:
-            frames: FrameSampler가 반환한 프레임 리스트
-                   [{'frame_id':..., 'timestamp':..., 'image': np.ndarray}]
-
-        Returns:
-            특징이 추가된 프레임 리스트
-            [{..., 'embedding': np.ndarray, 'ocr_text': str}]
+        프레임 리스트에서 CLIP 임베딩을 추출합니다. (병렬 처리용)
         """
         if not frames:
             return []
 
-        logger.info(f"특징 추출 시작: {len(frames)}장")
-        processed_frames = []
-
-        # 1. 이미지 객체 변환 (OpenCV BGR -> PIL RGB)
-        pil_images = []
-        for f in frames:
-            img_rgb = cv2.cvtColor(f['image'], cv2.COLOR_BGR2RGB)
-            pil_images.append(Image.fromarray(img_rgb))
-
-        # 2. CLIP 임베딩 (배치 처리)
+        logger.info(f"CLIP 임베딩 추출 시작: {len(frames)}장")
+        
         try:
+            # 1. 이미지 객체 변환 (OpenCV BGR -> PIL RGB)
+            pil_images = []
+            for f in frames:
+                img_rgb = cv2.cvtColor(f['image'], cv2.COLOR_BGR2RGB)
+                pil_images.append(Image.fromarray(img_rgb))
+
+            # 2. CLIP 임베딩 (배치 처리)
             embeddings = self.clip_model.encode(pil_images, batch_size=32, convert_to_numpy=True)
+            return list(embeddings)
+            
         except Exception as e:
             logger.error(f"CLIP 임베딩 생성 실패: {e}")
+            return [np.zeros(512) for _ in frames] # 실패 시 0 벡터 반환
+
+    def extract_ocr(self, frames: List[Dict[str, Any]]) -> List[str]:
+        """
+        프레임 리스트에서 OCR 텍스트를 추출합니다. (병렬 처리용)
+        """
+        if not frames:
             return []
 
-        # 3. OCR 수행 (순차 처리)
+        logger.info(f"OCR 텍스트 추출 시작: {len(frames)}장")
+        ocr_texts = []
+
         for i, frame in enumerate(frames):
             try:
                 # OCR 수행
                 ocr_result = self.ocr_reader.readtext(frame['image'], detail=0) # 텍스트만 추출
                 ocr_text = " ".join(ocr_result)
-                
-                # 결과 저장
-                processed_frame = frame.copy()
-                del processed_frame['image']  # 메모리 절약을 위해 원본 이미지는 제거 (필요시 유지)
-                
-                processed_frame['embedding'] = embeddings[i]
-                processed_frame['ocr_text'] = ocr_text
-                
-                processed_frames.append(processed_frame)
-                
+                ocr_texts.append(ocr_text)
             except Exception as e:
-                logger.warning(f"프레임 {frame['frame_id']} 처리 중 오류: {e}")
-                continue
+                logger.warning(f"프레임 {frame['frame_id']} OCR 실패: {e}")
+                ocr_texts.append("")
+        
+        return ocr_texts
 
-        logger.info(f"특징 추출 완료: {len(processed_frames)}장")
+    def extract(self, frames: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        (Legacy) 순차적으로 특징 추출 (하위 호환성 유지)
+        """
+        embeddings = self.extract_embeddings(frames)
+        ocr_texts = self.extract_ocr(frames)
+        
+        processed_frames = []
+        for i, frame in enumerate(frames):
+            processed_frame = frame.copy()
+            del processed_frame['image']
+            processed_frame['embedding'] = embeddings[i]
+            processed_frame['ocr_text'] = ocr_texts[i]
+            processed_frames.append(processed_frame)
+            
         return processed_frames
