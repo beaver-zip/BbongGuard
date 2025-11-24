@@ -1,103 +1,66 @@
-# 🛡️ BbongGuard - YouTube 가짜뉴스 탐지 확장프로그램
+# 🛡️ BbongGuard - 멀티모달 가짜뉴스 탐지 플랫폼
 
-YouTube 영상의 가짜뉴스 여부를 AI로 분석하여 알려주는 Chrome 확장프로그램입니다.
+BbongGuard는 YouTube 영상의 **텍스트(자막/댓글), 이미지(프레임), 오디오(음성)**를 종합적으로 분석하여 가짜뉴스, 낚시성 콘텐츠, 선동적인 영상을 탐지하는 AI 기반 확장프로그램입니다.
 
-## 📋 기능
+## 🌟 주요 기능
 
-- YouTube 영상의 가짜뉴스 확률 분석
-- YouTube Data API v3를 통한 영상 정보, 댓글, 관련 영상 수집
-- AI 추론 서버를 통한 종합 분석
-- 직관적인 UI로 분석 결과 표시
+### 1. 텍스트 팩트체크 (Text Module)
+- **RAG (Retrieval-Augmented Generation)**: Tavily API를 사용하여 웹에서 신뢰할 수 있는 증거를 수집하고, LLM(GPT-4o)이 주장의 진위를 판별합니다.
+- **주장 추출**: 영상의 자막과 설명에서 핵심 주장을 추출합니다.
+- **출처 검증**: 화이트리스트/블랙리스트 기반으로 신뢰할 수 있는 출처만 증거로 채택합니다.
+
+### 2. 이미지 자극성 탐지 (Image Module)
+- **스트리밍 샘플링**: 영상을 다운로드하지 않고 스트리밍 URL을 통해 0~90% 지점의 핵심 프레임(10장)을 즉시 추출하여 분석 속도를 극대화했습니다.
+- **자극성(Provocation) 분석**: 화면 내 텍스트(OCR)가 실제 내용보다 과장되거나 자극적인지(Clickbait) 탐지합니다.
+- **불일치(Inconsistency) 분석**: 썸네일이나 화면 텍스트가 영상의 실제 내용과 일치하는지 확인합니다.
+
+### 3. 오디오 선동성 탐지 (Audio Module)
+- **감정적 선동(Manipulation) 분석**: 화자의 목소리 톤과 감정을 분석하여, 내용에 비해 지나치게 격앙되거나 선동적인지 탐지합니다.
+- **부자연스러움(Unnaturalness) 분석**: 기계음이나 인위적인 조작 흔적을 탐지합니다.
+
+### 4. 종합 판정 (Verdict Agent)
+- 텍스트, 이미지, 오디오 분석 결과를 종합하여 최종 판정을 내립니다.
+- **판정 로직**:
+    - **악의적인 가짜뉴스**: 팩트체크(거짓) + 자극성/선동성(높음)
+    - **낚시성/과장된 콘텐츠**: 팩트체크(사실) + 자극성/선동성(높음)
+    - **단순 오정보**: 팩트체크(거짓) + 자극성/선동성(낮음)
+
+---
 
 ## 🏗️ 프로젝트 구조
 
 ```
 BbongGuard/
-├── extension/                 # Chrome 확장프로그램
-│   ├── manifest.json         # 확장프로그램 설정
-│   ├── popup/                # 팝업 UI
-│   │   ├── popup.html
-│   │   ├── popup.css
-│   │   └── popup.js
-│   ├── content/              # Content script
-│   │   └── content.js
-│   ├── background/           # Background service worker
-│   │   └── background.js
-│   ├── api/                  # API 통신 모듈
-│   │   ├── youtube-api.js
-│   │   └── inference-api.js
-│   ├── utils/                # 유틸리티
-│   │   ├── config.js
-│   │   └── video-info-extractor.js
-│   └── icons/                # 확장프로그램 아이콘
-│
-├── server/                    # FastAPI 추론 서버
-│   ├── main.py               # FastAPI 애플리케이션
+├── server/                    # FastAPI 백엔드 서버
+│   ├── main.py               # API 엔트리포인트
 │   ├── config.py             # 서버 설정
-│   ├── models.py             # API 요청/응답 스키마
-│   ├── preprocessor.py       # 데이터 전처리
-│   ├── inference.py          # 추론 엔진
-│   └── models/               # 학습된 모델 파일 (GitHub 제외)
-│       ├── OR-TDC.h5        # CNN 모델 (237MB)
-│       └── doc2vec.model    # Doc2Vec 모델 (13MB)
+│   ├── text_module/          # 텍스트 분석 (RAG, 팩트체크)
+│   ├── image_module/         # 이미지 분석 (자극성 탐지)
+│   ├── audio_module/         # 오디오 분석 (선동성 탐지)
+│   └── shared/               # 공통 모듈 (스키마, 로거, 유틸리티)
 │
-├── .env                       # 환경 변수
-├── .gitignore                 # Git ignore
-├── .venv/                     # Python 가상환경
+├── extension/                 # Chrome 확장프로그램 (클라이언트)
+├── logs/                      # 분석 로그 (Git 제외)
+├── .env                       # 환경 변수 설정
 └── requirements.txt           # Python 의존성
 ```
 
-## 🚀 설치 방법
+---
 
-### 1. 저장소 클론
+## 🚀 설치 및 실행 방법
+
+### 1. 필수 요구사항
+- Python 3.10 이상
+- FFmpeg (오디오/비디오 처리에 필요)
+- OpenAI API Key (GPT-4o 사용)
+- Tavily API Key (웹 검색용)
+
+### 2. 설치
 
 ```bash
+# 저장소 클론
 git clone https://github.com/beaver-zip/BbongGuard.git
 cd BbongGuard
-```
-
-### 2. 환경 변수 설정
-
-`.env` 파일에 YouTube API 키를 추가하세요.
-
-**YouTube API 키 발급 방법:**
-1. [Google Cloud Console](https://console.cloud.google.com/)에 접속
-2. 새 프로젝트 생성 또는 기존 프로젝트 선택
-3. "API 및 서비스" > "사용 설정된 API 및 서비스"
-4. "YouTube Data API v3" 검색 후 사용 설정
-5. "사용자 인증 정보" > "사용자 인증 정보 만들기" > "API 키" 생성
-
-### 3. Chrome 확장프로그램 로드
-
-1. Chrome 브라우저에서 `chrome://extensions/` 접속
-2. 우측 상단의 "개발자 모드" 활성화
-3. "압축해제된 확장 프로그램을 로드합니다" 클릭
-4. `BbongGuard/extension` 폴더 선택
-
-### 4. 확장프로그램에 API 키 설정
-
-1. Chrome 브라우저에서 `chrome://extensions/` 접속
-2. BbongGuard 확장프로그램 찾기
-3. "확장 프로그램 옵션" 또는 "세부정보" 클릭
-4. 설정 페이지에서 API 키 입력 및 저장
-5. "API 키 테스트" 버튼으로 정상 작동 확인
-
-## 🐍 Python 백엔드 (추론 서버)
-
-FastAPI 기반 추론 서버가 구현되어 있습니다. 
-OR-TDC 모델 (Original + Related + Title + Description + Comments)을 사용하여 YouTube 영상의 가짜뉴스 여부를 판정합니다.
-
-### 모델 정보
-
-- **Doc2Vec**: 텍스트 임베딩 모델 (100차원 벡터)
-- **CNN**: 1D Convolutional Neural Network (가짜뉴스 분류)
-- **입력**: 원본 영상 + 관련 영상 9개의 텍스트 (제목, 설명, 댓글)
-- **출력**: Fake/Real 판정 + 확률
-
-### Python 환경 설정
-
-```bash
-# Python 3.10 이상 권장
 
 # 가상환경 생성 및 활성화
 python -m venv .venv
@@ -108,139 +71,79 @@ source .venv/bin/activate  # macOS/Linux
 pip install -r requirements.txt
 ```
 
-### 환경 변수 설정
+### 3. 환경 변수 설정
 
-```bash
-# .env.example을 .env로 복사
-cp .env.example .env
+`.env` 파일을 생성하고 다음 정보를 입력하세요:
 
-# .env 파일 수정 (필요시)
+```ini
+# Server Configuration
 SERVER_HOST=0.0.0.0
 SERVER_PORT=8000
+
+# API Keys
+OPENAI_API_KEY=sk-...
+TAVILY_API_KEY=tvly-...
+
+# RAG Configuration
+RAG_MAX_CLAIMS=3
+RAG_MAX_SEARCH_RESULTS=5
 ```
 
-### 추론 서버 실행
+### 4. 서버 실행
 
 ```bash
-# 방법 1: uvicorn 직접 실행
-uvicorn server.main:app --host 0.0.0.0 --port 8000
+# 개발 모드 실행
+uvicorn server.main:app --reload
 
-# 방법 2: Python 모듈로 실행
+# 또는 Python 모듈로 실행
 python -m server.main
-
-# 개발 모드 (자동 재시작)
-uvicorn server.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-서버가 정상적으로 실행되면:
-- API 문서: http://localhost:8000/docs
-- 서버 상태: http://localhost:8000/health
+서버가 실행되면 `http://localhost:8000/docs`에서 API 문서를 확인할 수 있습니다.
 
-### API 엔드포인트
+---
 
-**1. Health Check**
-```
-GET /health
-```
-서버 및 모델 로딩 상태 확인
+## 📡 API 사용법
 
-**2. 영상 분석**
-```
-POST /api/analyze
-Content-Type: application/json
+### 멀티모달 분석 요청
 
-{
-  "videoId": "VIDEO_ID",
-  "title": "영상 제목",
-  "description": "영상 설명",
-  "comments": ["댓글1", "댓글2", ...],
-  "relatedVideos": [
-    {
-      "title": "관련 영상 제목",
-      "description": "관련 영상 설명"
-    },
-    ...
-  ]
-}
-```
+**POST** `/api/analyze-multimodal`
 
-응답:
 ```json
 {
-  "success": true,
-  "videoId": "VIDEO_ID",
-  "prediction": "Fake",
-  "fakeProbability": 0.75,
-  "confidence": 0.75,
-  "details": {
-    "fake_probability": 0.75,
-    "real_probability": 0.25,
-    "model_type": "OR-TDC",
-    "text_combination": "TDC"
-  }
+  "video_id": "VIDEO_ID",
+  "title": "영상 제목",
+  "description": "영상 설명",
+  "transcript": "자막 텍스트 (선택 사항)",
+  "duration_sec": 300
 }
 ```
 
-## 📖 사용 방법
+**Response Example:**
 
-1. YouTube 영상 페이지에 접속
-2. 확장프로그램 아이콘 클릭
-3. "영상 분석하기" 버튼 클릭
-4. 분석 결과 확인 (가짜뉴스 확률, 근거 등)
-
-## 🛠️ 개발
-
-### API 구조
-
-**YouTube Data API 호출 항목:**
-- `videos.list`: 영상 정보 (제목, 설명, 조회수 등)
-- `commentThreads.list`: 댓글 (최대 20개)
-- `search.list`: 관련 영상 목록 (최대 9개)
-
-**추론 서버 API (TODO):**
-```
-POST /api/analyze
-Content-Type: application/json
-
+```json
 {
-  "videoId": "...",
-  "title": "...",
-  "description": "...",
-  "comments": [...],
-  "thumbnailUrl": "..."
-}
-
-Response:
-{
-  "fakeProbability": 75.5,
-  "evidence": ["...", "..."],
-  "details": {...}
+  "video_id": "VIDEO_ID",
+  "final_verdict": {
+    "is_fake_news": false,
+    "confidence_level": "high",
+    "overall_reasoning": "텍스트 팩트체크 결과 사실로 확인되었으며...",
+    "recommendation": "안심하고 시청하셔도 됩니다."
+  },
+  "text_result": { ... },
+  "image_result": { ... },
+  "audio_result": { ... }
 }
 ```
 
-### 할당량 관리
-
-YouTube Data API v3는 일일 10,000 units의 무료 할당량을 제공합니다:
-- `videos.list`: 1 unit
-- `commentThreads.list`: 1 unit (페이지당)
-- `search.list`: 100 units
-
-댓글이 많은 영상을 분석할 경우 할당량이 빠르게 소진될 수 있으므로 주의하세요.
+---
 
 ## ⚠️ 주의사항
 
-1. **API 키 보안**: Chrome 확장프로그램에 API 키를 직접 포함하면 노출 위험이 있습니다. 실제 배포 시에는 백엔드 프록시 서버를 통해 API를 호출하는 것을 권장합니다.
-2. **할당량 제한**: YouTube API 무료 할당량을 초과하지 않도록 주의하세요.
-3. **분석 결과**: AI 분석 결과는 참고용이며, 100% 정확하지 않을 수 있습니다.
-
-## 📝 TODO
-
-- [ ] 추론 모델 개선
-- [ ] 백엔드 프록시 서버 구현 (API 키 보안)
-- [ ] 분석 결과 캐싱
-- [ ] 테스트 코드 
-- [ ] 배치 추론 지원 (여러 영상 동시 분석)
+- **비용**: OpenAI GPT-4o 및 Tavily API 사용에 따른 비용이 발생할 수 있습니다.
+- **속도**: 멀티모달 분석은 영상 길이에 따라 수 초에서 수 분이 소요될 수 있습니다. (스트리밍 최적화 적용됨)
+- **정확도**: AI 분석 결과는 보조적인 수단이며, 100% 정확성을 보장하지 않습니다.
 
 ## 📄 라이선스
 
-미정
+MIT License
