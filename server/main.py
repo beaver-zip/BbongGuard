@@ -1,211 +1,163 @@
-"""
-BbongGuard 추론 서버 - FastAPI 애플리케이션
-Chrome Extension과 통신하여 YouTube 영상 가짜뉴스 분석
-"""
+"""BbongGuard Backend API"""
 
-from fastapi import FastAPI, HTTPException, Depends
-from fastapi.middleware.cors import CORSMiddleware
 import logging
-import sys
+import os
+import asyncio
+from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
 
-from .config import Config
-from .models import (
-    AnalyzeRequest,
-    AnalyzeResponse,
-    ErrorResponse,
-    HealthResponse,
-    PredictionDetails
+from .shared.schemas import (
+    VideoMeta, 
+    Claim, 
+    HealthResponse, 
+    ErrorResponse
 )
-from .inference import get_inference_engine, InferenceEngine
+from .shared.rag_models import (
+    TextAnalysisRequest,
+    TextModuleResult,
+    MultiModalAnalysisResult,
+    FinalVerdict
+)
+from .text_module.text_analyzer import TextAnalyzer
+from .image_module.image_analyzer import ImageAnalyzer
+from .audio_module.audio_analyzer import AudioAnalyzer
+from .text_module.verdict_agent import VerdictAgent
+from .image_module.schemas import ImageAnalysisRequest
+from .audio_module.schemas import AudioAnalysisRequest
+
+# 환경 변수 로드
+load_dotenv()
 
 # 로깅 설정
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout)
-    ]
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
-
 logger = logging.getLogger(__name__)
 
-# FastAPI 앱 생성
 app = FastAPI(
     title="BbongGuard Inference Server",
-    description="YouTube 가짜뉴스 탐지 API",
-    version="1.0.0"
+    description="YouTube Fake News Detection API (Multimodal)",
+    version="0.2.0"
 )
 
-# CORS 설정 (Chrome Extension 허용)
+# CORS 설정
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 프로덕션에서는 특정 origin만 허용
+    allow_origins=["*"],  # 실제 배포 시에는 구체적인 도메인으로 제한 권장
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-
-@app.on_event("startup")
-async def startup_event():
-    """서버 시작 시 실행"""
-    logger.info("="*70)
-    logger.info("BbongGuard 추론 서버 시작")
-    logger.info("="*70)
-
-    # 설정 출력
-    Config.print_config()
-
-    # 설정 검증
-    errors = Config.validate()
-    if errors:
-        logger.error("설정 오류:")
-        for error in errors:
-            logger.error(f"  - {error}")
-        logger.error("\n모델 파일을 server/models/ 디렉토리에 배치해주세요.")
-        sys.exit(1)
-
-    # 추론 엔진 초기화 (모델 로딩)
-    try:
-        engine = get_inference_engine()
-        if not engine.is_ready():
-            raise RuntimeError("추론 엔진 초기화 실패")
-        logger.info("✓ 추론 엔진 준비 완료")
-    except Exception as e:
-        logger.error(f"추론 엔진 초기화 실패: {e}")
-        sys.exit(1)
-
-    logger.info("="*70)
-    logger.info(f"서버 준비 완료: http://{Config.HOST}:{Config.PORT}")
-    logger.info("="*70)
+# 모듈 인스턴스 (싱글톤처럼 사용)
+text_analyzer = TextAnalyzer()
+image_analyzer = ImageAnalyzer()
+audio_analyzer = AudioAnalyzer()
+verdict_agent = VerdictAgent()
 
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    """서버 종료 시 실행"""
-    logger.info("서버 종료 중...")
+@app.get("/health", response_model=HealthResponse)
+async def health_check():
+    """서버 상태 확인"""
+    return HealthResponse(status="ok", version="0.2.0")
 
 
-@app.get("/", tags=["Root"])
-async def root():
-    """루트 엔드포인트"""
-    return {
-        "message": "BbongGuard Inference Server",
-        "version": "1.0.0",
-        "docs": "/docs",
-        "health": "/health"
-    }
-
-
-@app.get("/health", response_model=HealthResponse, tags=["Health"])
-async def health_check(engine: InferenceEngine = Depends(get_inference_engine)):
+@app.post("/api/analyze-rag", response_model=TextModuleResult)
+async def analyze_video_text(request: TextAnalysisRequest):
     """
-    서버 상태 확인
-
-    Chrome Extension의 inference-api.js에서 checkServerHealth()로 호출됨
+    (Legacy) 텍스트 기반 RAG 분석 엔드포인트
     """
     try:
-        is_ready = engine.is_ready()
-
-        if is_ready:
-            return HealthResponse(
-                status="healthy",
-                message="서버가 정상 작동 중입니다",
-                models_loaded=True,
-                doc2vec_loaded=engine.doc2vec_loaded,
-                cnn_loaded=engine.cnn_loaded,
-                errors=[]
-            )
-        else:
-            return HealthResponse(
-                status="unhealthy",
-                message="모델 로딩에 문제가 있습니다",
-                models_loaded=False,
-                doc2vec_loaded=engine.doc2vec_loaded,
-                cnn_loaded=engine.cnn_loaded,
-                errors=["일부 모델이 로딩되지 않았습니다"]
-            )
-
+        logger.info(f"텍스트 분석 요청 수신: {request.video_id}")
+        result = await text_analyzer.analyze(request)
+        return result
     except Exception as e:
-        logger.error(f"Health check 실패: {e}")
-        return HealthResponse(
-            status="unhealthy",
-            message="서버 상태 확인 실패",
-            models_loaded=False,
-            doc2vec_loaded=False,
-            cnn_loaded=False,
-            errors=[str(e)]
-        )
+        logger.error(f"텍스트 분석 중 오류 발생: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/analyze", response_model=AnalyzeResponse, tags=["Analysis"])
-async def analyze_video(
-    request: AnalyzeRequest,
-    engine: InferenceEngine = Depends(get_inference_engine)
-):
+@app.post("/api/analyze-multimodal", response_model=MultiModalAnalysisResult)
+async def analyze_video_multimodal(request: TextAnalysisRequest):
     """
-    YouTube 영상 가짜뉴스 분석
-
-    Chrome Extension의 inference-api.js에서 analyzeWithInferenceServer()로 호출됨
-
-    Args:
-        request: 영상 정보 (videoId, title, description, comments, relatedVideos)
-
-    Returns:
-        분석 결과 (prediction, fakeProbability, confidence, details)
+    멀티모달(텍스트+이미지+오디오) 분석 엔드포인트
     """
     try:
-        logger.info(f"분석 요청 수신: {request.videoId}")
-
-        # 추론 엔진 상태 확인
-        if not engine.is_ready():
-            raise HTTPException(
-                status_code=503,
-                detail="추론 엔진이 준비되지 않았습니다"
+        logger.info(f"멀티모달 분석 요청 수신: {request.video_id}")
+        
+        # 1. 텍스트 모듈 실행 (Claim 추출 및 1차 팩트체크)
+        # 이미지/오디오 모듈은 Claim이 필요하므로 텍스트 모듈이 먼저 실행되어야 함
+        # (최적화를 위해 Claim 추출만 먼저 하고 병렬 처리할 수도 있으나, 여기서는 순차 진행 후 병렬)
+        
+        text_result = await text_analyzer.analyze(request)
+        
+        # VideoMeta 및 Claims 변환
+        video_meta = VideoMeta(
+            video_id=request.video_id,
+            url=f"https://www.youtube.com/watch?v={request.video_id}",
+            duration_sec=request.duration_sec,  # 영상 길이 설정
+            transcript=[{'text': request.transcript, 'start': 0, 'end': 0, 'duration': 0}] if request.transcript else []
+            # 주의: request.transcript가 단순 문자열이라 상세 타임스탬프 정보가 없을 수 있음.
+            # 실제로는 YouTube API에서 상세 자막을 받아와야 함.
+        )
+        
+        # TextAnalyzer 결과에서 Claims 복원 (ClaimVerdict -> Claim)
+        claims = []
+        for cv in text_result.claims:
+            claims.append(Claim(
+                claim_id=cv.claim_id,
+                claim_text=cv.claim_text,
+                category=cv.category,
+                importance="High" # 기본값
+            ))
+            
+        if not claims:
+            logger.info("추출된 주장이 없어 멀티모달 분석을 중단합니다.")
+            return MultiModalAnalysisResult(
+                video_id=request.video_id,
+                text_result=text_result,
+                final_verdict=FinalVerdict(
+                    is_fake_news=False,
+                    confidence_level="low",
+                    overall_reasoning="분석할 주장이 발견되지 않았습니다.",
+                    recommendation="영상 내용이 불충분하거나 분석할 수 없습니다."
+                )
             )
 
-        # 요청 데이터를 dict로 변환
-        video_data = request.model_dump()
-
-        # 추론 수행
-        result = engine.predict(video_data)
-
-        # 응답 생성
-        response = AnalyzeResponse(
-            success=True,
-            videoId=request.videoId,
-            prediction=result['prediction'],
-            fakeProbability=result['fakeProbability'],
-            confidence=result['confidence'],
-            evidence=None,  # 필요시 구현
-            details=PredictionDetails(**result['details'])
+        # 2. 이미지/오디오 모듈 병렬 실행
+        # 오디오 파일 경로가 없으므로 오디오 모듈은 자막 분석 위주로 동작하거나, 내부에서 다운로드 시도
+        
+        image_request = ImageAnalysisRequest(video_id=request.video_id, claims=claims)
+        audio_request = AudioAnalysisRequest(video_id=request.video_id, claims=claims)
+        
+        # 비동기 병렬 실행
+        image_task = asyncio.create_task(image_analyzer.analyze(image_request))
+        audio_task = asyncio.create_task(audio_analyzer.analyze(audio_request))
+        
+        image_result, audio_result = await asyncio.gather(image_task, audio_task)
+        
+        # 3. 최종 통합 판단
+        final_verdict = await verdict_agent.aggregate_multimodal_verdicts(
+            video_meta=video_meta,
+            claims=claims,
+            text_verdicts=text_result.claims,
+            image_results=image_result.model_dump(),
+            audio_results=audio_result.model_dump()
+        )
+        
+        return MultiModalAnalysisResult(
+            video_id=request.video_id,
+            text_result=text_result,
+            image_result=image_result,
+            audio_result=audio_result,
+            final_verdict=final_verdict
         )
 
-        logger.info(
-            f"분석 완료: {request.videoId} -> {result['prediction']} "
-            f"(신뢰도: {result['confidence']*100:.2f}%)"
-        )
-
-        return response
-
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.error(f"분석 중 오류 발생: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"분석 중 오류가 발생했습니다: {str(e)}"
-        )
+        logger.error(f"멀티모달 분석 중 오류 발생: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
-
-# 개발 환경에서 직접 실행
 if __name__ == "__main__":
     import uvicorn
-
-    uvicorn.run(
-        "server.main:app",
-        host=Config.HOST,
-        port=Config.PORT,
-        reload=True,
-        log_level="info"
-    )
+    uvicorn.run(app, host="0.0.0.0", port=8000)
