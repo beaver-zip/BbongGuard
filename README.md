@@ -9,21 +9,28 @@ BbongGuard는 YouTube 영상의 **텍스트(자막/댓글), 이미지(프레임)
 - **주장 추출**: 영상의 자막과 설명에서 핵심 주장을 추출합니다.
 - **출처 검증**: 화이트리스트/블랙리스트 기반으로 신뢰할 수 있는 출처만 증거로 채택합니다.
 
-### 2. 이미지 자극성 탐지 (Image Module)
-- **스트리밍 샘플링**: 영상을 다운로드하지 않고 스트리밍 URL을 통해 0~90% 지점의 핵심 프레임(10장)을 즉시 추출하여 분석 속도를 극대화했습니다.
-- **자극성(Provocation) 분석**: 화면 내 텍스트(OCR)가 실제 내용보다 과장되거나 자극적인지(Clickbait) 탐지합니다.
-- **불일치(Inconsistency) 분석**: 썸네일이나 화면 텍스트가 영상의 실제 내용과 일치하는지 확인합니다.
+### 2. 이미지 분석 (Image Module)
+- **스트리밍 샘플링**: 영상을 다운로드하지 않고 스트리밍 URL을 통해 핵심 프레임(5장)을 즉시 추출하여 분석 속도를 극대화했습니다.
+- **썸네일 재사용 탐지**: Google Cloud Vision API의 Web Detection으로 썸네일이 다른 곳에서 재사용된 것인지 탐지합니다.
+- **프레임 맥락 분석**: Label Detection과 Text Detection으로 영상 내 객체와 텍스트를 추출하여 주장과의 일치 여부를 확인합니다.
 
-### 3. 오디오 선동성 탐지 (Audio Module)
-- **감정적 선동(Manipulation) 분석**: 화자의 목소리 톤과 감정을 분석하여, 내용에 비해 지나치게 격앙되거나 선동적인지 탐지합니다.
-- **부자연스러움(Unnaturalness) 분석**: 기계음이나 인위적인 조작 흔적을 탐지합니다.
+### 3. 오디오 분석 (Audio Module)
+- **음성 인식(STT)**: Naver Clova Speech API를 사용하여 영상의 오디오를 텍스트로 변환합니다.
+- **제목 낚시 탐지**: 변환된 텍스트와 영상 제목을 비교하여, 제목이 실제 내용과 다른 낚시성 콘텐츠인지 LLM으로 판별합니다.
+- **주제 이탈 감지**: 오디오 내용이 제목에서 암시한 주제와 크게 벗어났는지 확인합니다.
 
-### 4. 종합 판정 (Verdict Agent)
-- 텍스트, 이미지, 오디오 분석 결과를 종합하여 최종 판정을 내립니다.
-- **판정 로직**:
-    - **악의적인 가짜뉴스**: 팩트체크(거짓) + 자극성/선동성(높음)
-    - **낚시성/과장된 콘텐츠**: 팩트체크(사실) + 자극성/선동성(높음)
-    - **단순 오정보**: 팩트체크(거짓) + 자극성/선동성(낮음)
+### 4. 3단계 판정 시스템 (Verdict Status)
+- **verified_true**: 증거가 주장을 뒷받침함 (사실)
+- **verified_false**: 증거가 주장을 반박함 (거짓)
+- **insufficient_evidence**: 증거 부족으로 판정 불가
+
+### 5. 종합 판정 (Verdict Agent)
+- 텍스트, 이미지, 오디오 분석 결과를 LLM이 종합하여 최종 판정을 내립니다.
+- **판정 요소**:
+    - 텍스트 팩트체크 결과 (verified_true/verified_false/insufficient_evidence)
+    - 이미지 재사용 및 맥락 일치 여부
+    - 오디오 제목 낚시 및 주제 이탈 여부
+- **최종 결과**: 종합적인 신뢰도(high/medium/low)와 권장 사항 제공
 
 ---
 
@@ -73,7 +80,13 @@ pip install -r requirements.txt
 
 ### 3. 환경 변수 설정
 
-`.env` 파일을 생성하고 다음 정보를 입력하세요:
+`.env_example` 파일을 복사하여 `.env` 파일을 생성하고 실제 API 키를 입력하세요:
+
+```bash
+cp .env_example .env
+```
+
+`.env` 파일 예시:
 
 ```ini
 # Server Configuration
@@ -81,12 +94,20 @@ SERVER_HOST=0.0.0.0
 SERVER_PORT=8000
 
 # API Keys
-OPENAI_API_KEY=sk-...
-TAVILY_API_KEY=tvly-...
+OPENAI_API_KEY=sk-your-actual-key-here
+TAVILY_API_KEY=tvly-your-actual-key-here
+GOOGLE_APPLICATION_CREDENTIALS_PATH=path/to/google-service-account-key.json
+NAVER_CLOVA_SPEECH_INVOKE_URL=https://clovaspeech-gw.ncloud.com/...
+NAVER_CLOVA_SPEECH_SECRET_KEY=your-naver-key-here
 
 # RAG Configuration
-RAG_MAX_CLAIMS=3
-RAG_MAX_SEARCH_RESULTS=5
+RAG_MAX_CLAIMS=5
+RAG_MAX_SEARCH_RESULTS=10
+RAG_TOP_EVIDENCE=5
+
+# LLM Configuration
+LLM_MODEL=gpt-4o
+LLM_TEMPERATURE=0.1
 ```
 
 ### 4. 서버 실행
