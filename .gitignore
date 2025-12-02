@@ -48,3 +48,8 @@ logs/
 test_multimodal.py
 quick_test.py
 BbongGuard_v2/
+
+# Backup directories
+server_old/
+server_backup/
+server_backup_new/

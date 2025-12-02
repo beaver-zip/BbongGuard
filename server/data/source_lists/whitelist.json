@@ -1,0 +1,79 @@
+{
+  "tier1": {
+    "description": "최고 신뢰도 - 공신력 있는 언론사, 정부 기관",
+    "score": 1.0,
+    "domains": [
+      "kbs.co.kr",
+      "jtbc.co.kr",
+      "ytn.co.kr",
+      "mbc.co.kr",
+      "sbs.co.kr",
+      "korea.kr",
+      "go.kr",
+      "bok.or.kr",
+      "moef.go.kr",
+      "mois.go.kr",
+      "who.int",
+      "un.org"
+    ],
+    "categories": ["정치", "경제", "사회", "국제", "정책", "통계"]
+  },
+  "tier2": {
+    "description": "높은 신뢰도 - 주요 종합 일간지",
+    "score": 0.9,
+    "domains": [
+      "chosun.com",
+      "donga.com",
+      "joongang.co.kr",
+      "hani.co.kr",
+      "khan.co.kr",
+      "hankookilbo.com",
+      "Seoul.co.kr",
+      "kmib.co.kr"
+    ],
+    "categories": ["정치", "경제", "사회", "문화"]
+  },
+  "tier3": {
+    "description": "중간 신뢰도 - 전문 언론, 경제지",
+    "score": 0.8,
+    "domains": [
+      "mt.co.kr",
+      "mk.co.kr",
+      "hankyung.com",
+      "sedaily.com",
+      "etnews.com",
+      "zdnet.co.kr",
+      "sisajournal.com",
+      "newsis.com",
+      "newdaily.co.kr"
+    ],
+    "categories": ["경제", "IT", "산업"]
+  },
+  "tier4": {
+    "description": "학술/전문 기관 - 연구 및 의학 정보",
+    "score": 0.95,
+    "domains": [
+      "ac.kr",
+      "edu",
+      "pubmed.gov",
+      "nature.com",
+      "science.org",
+      "scholar.google.com",
+      "researchgate.net",
+      "kdca.go.kr",
+      "mohw.go.kr"
+    ],
+    "categories": ["과학", "건강", "의학", "연구", "교육"]
+  },
+  "tier5": {
+    "description": "참고용 - 포털 뉴스, 위키백과",
+    "score": 0.7,
+    "domains": [
+      "naver.com/news",
+      "daum.net/news",
+      "wikipedia.org",
+      "namuwiki.com"
+    ],
+    "categories": ["일반"]
+  }
+}

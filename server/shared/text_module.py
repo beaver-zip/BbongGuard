@@ -29,7 +29,8 @@ class ClaimVerdict(BaseModel):
     claim_id: str
     claim_text: str
     category: str
-    is_fake: bool
+    verdict_status: str = "insufficient_evidence"  # "verified_true" | "verified_false" | "insufficient_evidence"
+    is_fake: bool  # 하위 호환성 유지
     verdict_reason: str
     evidence: List[Evidence] = Field(default_factory=list)
     processing_time_ms: float = 0

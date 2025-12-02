@@ -1,6 +1,7 @@
 """웹 검색 및 필터링"""
 
 import logging
+import asyncio
 from typing import List, Dict, Any
 from tavily import TavilyClient
 
@@ -30,27 +31,21 @@ class WebSearcher:
     async def search_claim(self, claim: Claim) -> List[Dict[str, Any]]:
         """
         주장에 대해 Tavily 웹 검색을 수행합니다.
-
-        Args:
-            claim: 검색할 주장 객체
-
-        Returns:
-            Tavily API 원시 검색 결과 리스트
         """
         try:
-            # 검색 쿼리 생성
-            query = self.query_builder.build_search_query(claim)
+            # [수정] QueryBuilder가 비동기(async)이므로 반드시 await를 붙여야 함!
+            query = await self.query_builder.build_search_query(claim)
 
             logger.info(f"웹 검색 시작: {query}")
 
-            # Tavily 검색
-            response = self.client.search(
+            # Tavily 검색 (Blocking I/O)을 비동기 스레드로 실행
+            response = await asyncio.to_thread(
+                self.client.search,
                 query=query,
                 search_depth="advanced",
                 max_results=self.max_results,
                 include_answer=False,
-                include_raw_content=False,
-                include_domains=self._get_include_domains()
+                include_raw_content=False
             )
 
             results = response.get('results', [])
@@ -62,27 +57,6 @@ class WebSearcher:
             logger.error(f"웹 검색 실패: {e}", exc_info=True)
             return []
 
-    def _get_include_domains(self) -> List[str]:
-        """
-        화이트리스트에서 신뢰할 수 있는 도메인 목록을 가져옵니다.
-
-        와일드카드를 제거하고 Tavily API에서 사용 가능한 형식으로 변환합니다.
-
-        Returns:
-            검색에 포함할 도메인 리스트
-        """
-        include_domains = []
-
-        for tier_name in ['tier1', 'tier2', 'tier3']:
-            if tier_name in self.source_manager.whitelist:
-                tier_info = self.source_manager.whitelist[tier_name]
-                if 'domains' in tier_info:
-                    # 와일드카드 제거
-                    domains = [d for d in tier_info['domains'] if '*' not in d]
-                    include_domains.extend(domains)
-
-        return include_domains
-
     def filter_and_format_results(
         self,
         raw_results: List[Dict[str, Any]],
@@ -90,15 +64,6 @@ class WebSearcher:
     ) -> List[Dict[str, Any]]:
         """
         검색 결과를 블랙리스트와 신뢰도 기준으로 필터링하고 Evidence 형식으로 변환합니다.
-
-        신뢰도 0.5 미만의 출처는 제외됩니다.
-
-        Args:
-            raw_results: Tavily 원시 검색 결과
-            claim: 연관된 주장 객체
-
-        Returns:
-            필터링되고 포맷팅된 Evidence 딕셔너리 리스트
         """
         filtered_evidence = []
 
@@ -114,8 +79,8 @@ class WebSearcher:
             credibility_info = self.source_manager.get_credibility_info(url, claim.category)
             domain_score = credibility_info['final_score']
 
-            # 신뢰도 기준 미달 필터링
-            if domain_score < 0.5:
+            # 신뢰도 기준 완화 (0.1)
+            if domain_score < 0.1:
                 logger.debug(f"신뢰도 미달 ({domain_score:.2f}): {url}")
                 continue
 
@@ -140,15 +105,7 @@ class WebSearcher:
         return filtered_evidence
 
     async def search_and_filter(self, claim: Claim) -> List[Dict[str, Any]]:
-        """
-        웹 검색과 필터링을 한 번에 수행합니다.
-
-        Args:
-            claim: 검색할 주장 객체
-
-        Returns:
-            필터링된 Evidence 딕셔너리 리스트
-        """
+        """웹 검색과 필터링을 한 번에 수행합니다."""
         raw_results = await self.search_claim(claim)
         evidence_list = self.filter_and_format_results(raw_results, claim)
         return evidence_list

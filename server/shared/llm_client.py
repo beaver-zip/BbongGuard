@@ -186,15 +186,22 @@ class LLMClient:
         evidence_list: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """
-        주장을 증거 기반으로 판정 (Binary: 가짜 vs 사실)
+        주장을 증거 기반으로 판정 (3가지 상태)
 
         Args:
             claim: 판정할 주장
             evidence_list: 증거 목록 [{"source_title": "...", "snippet": "...", ...}]
 
         Returns:
-            판정 결과 {"is_fake": bool, "reason": "..."}
+            판정 결과 {"verdict_status": str, "reason": "..."}
         """
+        # 증거가 없으면 바로 insufficient_evidence 반환
+        if not evidence_list:
+            return {
+                "verdict_status": "insufficient_evidence",
+                "reason": "관련 증거를 찾지 못했습니다."
+            }
+
         # Evidence 포맷팅 (출처 강조)
         evidence_text = ""
         for i, ev in enumerate(evidence_list, 1):
@@ -205,10 +212,7 @@ class LLMClient:
             evidence_text += f"\n{i}. [{domain}] {source_title}\n"
             evidence_text += f"   내용: {snippet}\n"
 
-        if not evidence_list:
-            evidence_text = "\n[증거 없음] 신뢰할 수 있는 출처에서 관련 정보를 찾을 수 없습니다."
-
-        prompt = f"""당신은 팩트체커입니다. 주장과 증거들을 보고 가짜뉴스 여부를 판단하세요.
+        prompt = f"""당신은 팩트체커입니다. 주장과 증거들을 보고 진위를 판단하세요.
 
 주장: "{claim}"
 
@@ -216,40 +220,39 @@ class LLMClient:
 {evidence_text}
 
 판단 기준:
-1. 증거의 출처가 신뢰할 만한가? (언론사, 공식 기관 등)
-2. 주장과 증거 내용이 일치하는가?
-3. 증거들이 일관되게 주장을 뒷받침하거나 반박하는가?
+1. 증거가 주장을 뒷받침하면 → verdict_status: "verified_true"
+2. 증거가 주장을 반박하면 → verdict_status: "verified_false"  
+3. 증거로 판단하기 어려우면 → verdict_status: "insufficient_evidence"
 
 출력 형식 (JSON):
 {{
-  "is_fake": false,  // true: 가짜, false: 사실
-  "reason": "판정 이유를 한 문장으로 요약. 어떤 출처에서 어떻게 확인했는지 명시."
-}}
-
-주의사항:
-- 증거가 없으면 is_fake: true (검증 불가능한 주장은 가짜로 간주)
-- 증거가 주장을 뒷받침하면 is_fake: false
-- 증거가 주장과 상충하면 is_fake: true
-- reason은 사용자가 이해하기 쉽게 작성하세요."""
+  "verdict_status": "verified_true|verified_false|insufficient_evidence",
+  "reason": "판정 이유를 한 문장으로 요약"
+}}"""
 
         messages = [{"role": "user", "content": prompt}]
 
         try:
             result = await self.chat_completion_json(messages)
-            is_fake = result.get('is_fake', True)
+            verdict_status = result.get('verdict_status', 'insufficient_evidence')
+            
+            # 유효성 검사
+            if verdict_status not in ["verified_true", "verified_false", "insufficient_evidence"]:
+                verdict_status = "insufficient_evidence"
+            
             reason = result.get('reason', '판정 이유 없음')
 
-            logger.info(f"주장 판정 완료: {claim[:50]}... -> {'가짜' if is_fake else '사실'}")
+            logger.info(f"주장 판정 완료: {claim[:50]}... -> {verdict_status}")
             return {
-                "is_fake": is_fake,
+                "verdict_status": verdict_status,
                 "reason": reason
             }
         except Exception as e:
             logger.error(f"주장 판정 실패: {e}")
-            # 실패 시 기본값 (안전하게 가짜로 판정)
+            # 실패 시 기본값
             return {
-                "is_fake": True,
-                "reason": f"판정 중 오류 발생: {str(e)}"
+                "verdict_status": "insufficient_evidence",
+                "reason": f"판정 중 오류: {str(e)}"
             }
 
     async def chat_completion_image(

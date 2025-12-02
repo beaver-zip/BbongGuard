@@ -26,8 +26,7 @@ class VerdictAgent:
         evidence_list: List[Evidence]
     ) -> ClaimVerdict:
         """
-        증거를 기반으로 주장이 가짜인지 사실인지 이진 판정합니다.
-        (기존 텍스트 모듈 로직 유지)
+        증거를 기반으로 주장의 진위를 판정합니다.
         """
         start_time = time.time()
 
@@ -35,26 +34,35 @@ class VerdictAgent:
             llm_client = await get_llm_client()
             evidence_dicts = [ev.model_dump() for ev in evidence_list]
 
-            # LLM 이진 판정
+            # LLM 판정 (verdict_status 반환)
             judgment = await llm_client.judge_claim(
                 claim=claim.claim_text,
                 evidence_list=evidence_dicts
             )
 
-            is_fake = judgment.get('is_fake', True)
+            verdict_status = judgment.get('verdict_status', 'insufficient_evidence')
             verdict_reason = judgment.get('reason', '판정 근거 없음')
+            
+            # verdict_status를 is_fake로 변환 (하위 호환성)
+            is_fake = (verdict_status == "verified_false")
 
             verdict = ClaimVerdict(
                 claim_id=claim.claim_id,
                 claim_text=claim.claim_text,
                 category=claim.category,
+                verdict_status=verdict_status,
                 is_fake=is_fake,
                 verdict_reason=verdict_reason,
                 evidence=evidence_list,
                 processing_time_ms=(time.time() - start_time) * 1000
             )
 
-            logger.info(f"주장 판정 완료: {claim.claim_text[:50]}... -> {'가짜' if is_fake else '사실'}")
+            status_kr = {
+                'verified_true': '사실', 
+                'verified_false': '가짜', 
+                'insufficient_evidence': '검증불가'
+            }[verdict_status]
+            logger.info(f"주장 판정 완료: {claim.claim_text[:50]}... -> {status_kr}")
             return verdict
 
         except Exception as e:
@@ -63,7 +71,8 @@ class VerdictAgent:
                 claim_id=claim.claim_id,
                 claim_text=claim.claim_text,
                 category=claim.category,
-                is_fake=True,
+                verdict_status="insufficient_evidence",
+                is_fake=False,
                 verdict_reason=f"판정 중 오류 발생: {str(e)}",
                 evidence=evidence_list,
                 processing_time_ms=(time.time() - start_time) * 1000

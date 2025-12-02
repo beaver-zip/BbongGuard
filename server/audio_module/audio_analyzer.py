@@ -1,133 +1,82 @@
-"""오디오 분석 파이프라인 Orchestrator"""
+"""
+Naver Cloud Clova Speech 기반 오디오 분석 모듈
+- 오디오 다운로드 및 STT (Speech-to-Text)
+- 제목 낚시 및 주제 이탈 탐지
+"""
 
 import logging
 import time
 import os
-from typing import List, Dict, Any
+import json
+import requests
+import asyncio
+import yt_dlp
+import tempfile
+from typing import List, Dict, Any, Optional
 
-from ..shared.schemas import VideoMeta, Claim, AudioSegment
-from .aligner import TranscriptAligner
-from .feature_extractor import AudioFeatureExtractor
-from .summarizer import AudioLLMSummarizer
+from ..shared.schemas import Claim, VideoMeta
 from ..shared.logger_utils import log_execution
 from .schemas import AudioAnalysisRequest, AudioModuleResult, ClaimVerdict
+from ..shared.llm_client import get_llm_client
+from ..config import Config
 
 logger = logging.getLogger(__name__)
 
 class AudioAnalyzer:
-    """오디오 모듈 전체 파이프라인을 실행하는 클래스"""
+    """
+    Naver Clova Speech API를 사용하여 오디오 내용을 분석하고
+    제목/주장과의 일치 여부(낚시성)를 판별하는 클래스
+    """
 
     def __init__(self):
         """AudioAnalyzer 초기화"""
-        logger.info("AudioAnalyzer 초기화 시작...")
-        try:
-            self.aligner = TranscriptAligner()
-            self.extractor = AudioFeatureExtractor()
-            self.summarizer = AudioLLMSummarizer()
-            logger.info("AudioAnalyzer 초기화 완료")
-        except Exception as e:
-            logger.error(f"AudioAnalyzer 초기화 실패: {e}")
-            raise
-
-    def _download_audio(self, video_url: str) -> str:
-        """오디오 다운로드 (임시 파일)"""
-        import yt_dlp
-        import tempfile
+        logger.info("AudioAnalyzer(Naver Cloud) 초기화 시작...")
         
-        try:
-            # 임시 파일 생성 (확장자는 yt-dlp가 결정하도록 둠, 하지만 편의상 mp3/wav 등 지정)
-            # 여기서는 tempfile로 디렉토리만 받고 yt-dlp 템플릿으로 파일명 지정
-            temp_dir = tempfile.mkdtemp()
-            output_path = os.path.join(temp_dir, "audio.%(ext)s")
-            
-            ydl_opts = {
-                'format': 'bestaudio/best',
-                'postprocessors': [{
-                    'key': 'FFmpegExtractAudio',
-                    'preferredcodec': 'wav',
-                    'preferredquality': '192',
-                }],
-                'outtmpl': output_path,
-                'quiet': True,
-                'no_warnings': True,
-            }
-            
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([video_url])
-                
-            # 다운로드된 파일 찾기 (.wav)
-            for f in os.listdir(temp_dir):
-                if f.endswith(".wav"):
-                    return os.path.join(temp_dir, f)
-            
-            return None
-        except Exception as e:
-            logger.error(f"오디오 다운로드 실패: {e}")
-            return None
+        self.invoke_url = Config.NAVER_CLOVA_SPEECH_INVOKE_URL
+        self.secret_key = Config.NAVER_CLOVA_SPEECH_SECRET_KEY
+        
+        if not self.invoke_url or not self.secret_key:
+            logger.warning("Naver Clova Speech 설정이 누락되었습니다.")
 
     @log_execution(module_name="audio", step_name="full_analysis")
     async def analyze(self, request: AudioAnalysisRequest) -> AudioModuleResult:
         """
-        오디오 분석을 수행합니다. (감정적 선동 탐지)
+        오디오 분석 수행 (다운로드 -> STT -> 낚시 탐지)
         """
         start_time = time.time()
         logger.info(f"오디오 분석 시작: {request.video_id}")
-
+        
         temp_audio_path = None
-
+        summary = "분석 실패"
+        transcript = ""
+        
         try:
-            # 1. 오디오 다운로드
-            # 오디오는 용량이 작으므로 전체 다운로드 후 구간 추출이 효율적일 수 있음
-            # 또는 스트리밍을 지원한다면 좋겠지만, librosa/wav2vec2 처리를 위해 파일이 필요함
+            # 1. 오디오 다운로드 (yt-dlp)
             video_url = f"https://www.youtube.com/watch?v={request.video_id}"
-            temp_audio_path = self._download_audio(video_url)
+            temp_audio_path = await asyncio.to_thread(self._download_audio, video_url)
             
             if not temp_audio_path:
-                return AudioModuleResult(
-                    modality="audio",
-                    video_id=request.video_id,
-                    analysis_summary="오디오 다운로드 실패",
-                    claims=[],
-                    processing_time_ms=(time.time() - start_time) * 1000,
-                    status="error"
-                )
-
-            # 2. 0-9 지점 구간 추출 (±5초)
-            import librosa
-            duration = librosa.get_duration(path=temp_audio_path)
-            
-            segments = []
-            target_positions = [i * 0.1 for i in range(10)]
-            
-            for i, pos in enumerate(target_positions):
-                center_time = duration * pos
-                start_time_seg = max(0, center_time - 5)
-                end_time_seg = min(duration, center_time + 5)
+                summary = "오디오 파일을 다운로드할 수 없습니다."
+            else:
+                # 2. Naver Clova Speech로 텍스트 변환 (STT)
+                transcript = await asyncio.to_thread(self._transcribe_audio, temp_audio_path)
                 
-                segments.append(AudioSegment(
-                    segment_id=f"sample_{i}",
-                    start=start_time_seg,
-                    end=end_time_seg,
-                    transcript_text="", # 텍스트 매칭은 생략하거나 별도 로직 필요
-                    tone="",
-                    emotion="",
-                    spoof_score=0.0
-                ))
+                if not transcript:
+                    summary = "오디오에서 목소리를 감지하지 못했거나 API 호출에 실패했습니다."
+                else:
+                    # 3. 제목 낚시 및 주제 이탈 분석 (LLM)
+                    video_title = getattr(request, 'title', '제목 미상') 
+                    analysis_result = await self._detect_fishing(video_title, transcript)
+                    summary = analysis_result
 
-            # 3. 특징 추출 (감정/톤)
-            processed_segments = self.extractor.extract(temp_audio_path, segments)
-            
-            # 4. 감정적 선동 분석 (LLM)
-            manipulation_analysis = await self._analyze_manipulation(processed_segments, request.claims)
-            
-            # 결과 매핑
+            # 4. 결과 매핑
             audio_claims = []
             for claim in request.claims:
                 audio_claims.append(ClaimVerdict(
                     claim_id=claim.claim_id,
-                    audio_support_score=0.0, # 더 이상 사용 안 함
-                    notes=[manipulation_analysis['summary']],
-                    segments=[] # 상세 구간 정보는 생략하거나 필요시 추가
+                    audio_support_score=0.0,
+                    notes=[summary],
+                    segments=[] 
                 ))
 
             processing_time = (time.time() - start_time) * 1000
@@ -136,7 +85,7 @@ class AudioAnalyzer:
             return AudioModuleResult(
                 modality="audio",
                 video_id=request.video_id,
-                analysis_summary=manipulation_analysis['summary'],
+                analysis_summary=summary,
                 claims=audio_claims,
                 processing_time_ms=processing_time,
                 status="success",
@@ -154,51 +103,122 @@ class AudioAnalyzer:
                 error_message=str(e)
             )
         finally:
-            # 임시 파일 삭제
             if temp_audio_path and os.path.exists(temp_audio_path):
                 try:
                     os.remove(temp_audio_path)
-                    os.rmdir(os.path.dirname(temp_audio_path))
                 except:
                     pass
 
-    async def _analyze_manipulation(self, segments: List[AudioSegment], claims: List[Claim]) -> Dict[str, Any]:
-        """
-        오디오 구간의 감정/톤을 분석하여 선동 여부를 판단합니다.
-        """
-        from ..shared.llm_client import get_llm_client
-        llm = get_llm_client()
-        
-        emotions = [f"{s.start:.1f}s: {s.emotion} ({s.tone})" for s in segments]
-        emotions_text = "\n".join(emotions)
-        
-        claim_texts = "\n".join([f"- {c.claim_text}" for c in claims])
-        
-        prompt = f"""
-        다음은 유튜브 영상의 10개 지점에서 추출한 화자의 감정 및 어조 분석 결과입니다.
-        화자가 시청자를 감정적으로 선동하거나, 내용(주장)에 비해 지나치게 격앙된 어조를 사용하는지 분석해주세요.
-
-        [감정/어조 분석 결과]
-        {emotions_text}
-
-        [핵심 주장]
-        {claim_texts}
-
-        분석 기준:
-        1. 감정적 선동 (Emotional Manipulation): 0~10점. (10: 분노/공포 등 부정적 감정을 과도하게 표출)
-        2. 부자연스러움 (Unnaturalness): 0~10점. (10: 기계음 같거나 매우 부자연스러운 억양)
-        
-        결과를 JSON 형식으로 반환해주세요:
-        {{
-            "manipulation_score": int,
-            "unnaturalness_score": int,
-            "summary": "한 줄 요약 (예: 전반적으로 차분하나 특정 구간에서 급격히 분노를 표출하여 선동 의심)"
-        }}
-        """
-        
+    def _download_audio(self, video_url: str) -> Optional[str]:
+        """yt-dlp를 사용하여 오디오 다운로드 (m4a/mp3)"""
         try:
-            response = await llm.generate_json(prompt)
-            return response
+            fd, temp_path = tempfile.mkstemp(suffix=".m4a")
+            os.close(fd)
+            if os.path.exists(temp_path):
+                os.remove(temp_path) 
+
+            ydl_opts = {
+                'format': 'bestaudio/best',
+                'outtmpl': temp_path,
+                'quiet': True,
+                'no_warnings': True,
+                'overwrites': True,
+                'postprocessors': [{
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'm4a',
+                }],
+            }
+            
+            logger.info(f"오디오 다운로드 시작: {video_url}")
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([video_url])
+            
+            if os.path.exists(temp_path):
+                return temp_path
+            elif os.path.exists(temp_path + ".m4a"):
+                return temp_path + ".m4a"
+            
+            return None
         except Exception as e:
-            logger.error(f"선동 분석 실패: {e}")
-            return {"manipulation_score": 0, "unnaturalness_score": 0, "summary": "분석 실패"}
+            logger.error(f"Audio Download Failed: {e}")
+            return None
+
+    def _transcribe_audio(self, file_path: str) -> str:
+        """Naver Clova Speech API 호출 (파일 업로드 방식)"""
+        if not self.invoke_url or not self.secret_key:
+            return ""
+
+        try:
+            base_url = self.invoke_url.rstrip('/')
+            if base_url.endswith('/recognizer/upload'):
+                api_url = base_url
+            else:
+                api_url = f"{base_url}/recognizer/upload"
+            
+            headers = {
+                'X-CLOVASPEECH-API-KEY': self.secret_key
+            }
+            
+            files = {'media': open(file_path, 'rb')}
+            
+            # [중요 수정] diarization(화자 인식) 기능을 끔
+            data = {
+                'params': json.dumps({
+                    'language': 'ko-KR',
+                    'completion': 'sync',
+                    'wordAlignment': False,
+                    'fullText': True,
+                    'diarization': { "enable": False } 
+                })
+            }
+            
+            logger.info(f"Clova Speech API 요청: {api_url}")
+            response = requests.post(api_url, headers=headers, files=files, data=data, timeout=120)
+            
+            files['media'].close()
+
+            if response.status_code == 200:
+                res_json = response.json()
+                text = res_json.get('text', '')
+                logger.info(f"STT 변환 성공: {len(text)}자")
+                return text
+            else:
+                logger.error(f"Clova Speech API Error: {response.status_code} - {response.text}")
+                return ""
+                
+        except Exception as e:
+            logger.error(f"Transcribe Failed: {e}")
+            return ""
+
+    async def _detect_fishing(self, title: str, transcript: str) -> str:
+        """LLM을 사용하여 제목과 스크립트 내용의 일치 여부 분석"""
+        try:
+            llm = await get_llm_client()
+            transcript_preview = transcript[:3000] + "..." if len(transcript) > 3000 else transcript
+            
+            prompt = f"""
+            당신은 뉴스 기사 및 영상 분석 전문가입니다.
+            다음 유튜브 영상의 '제목'과 실제 '오디오 내용(스크립트)'을 비교하여, 제목이 내용을 왜곡하거나 과장하는 '낚시성(Clickbait)'인지 판별해주세요.
+
+            [영상 제목]
+            {title}
+
+            [오디오 내용]
+            {transcript_preview}
+
+            분석 가이드:
+            1. **사실 일치 여부**: 제목에서 주장하는 핵심 사건이 실제 내용에 포함되어 있습니까?
+            2. **주제 이탈 여부**: 제목은 심각한데 내용은 가벼운 잡담이거나 전혀 다른 주제입니까?
+            3. **결론 도출**: 위 분석을 바탕으로 이 영상이 '정상적인 정보 전달'인지, '낚시성/허위 콘텐츠'인지 명확히 결론을 내려주세요.
+
+            한 문장으로 요약해서 답변하세요.
+            """
+            
+            messages = [{"role": "user", "content": prompt}]
+            response = await llm.chat_completion(messages)
+            
+            return response
+            
+        except Exception as e:
+            logger.error(f"Fishing Detection Failed: {e}")
+            return "내용 분석 중 오류가 발생했습니다."

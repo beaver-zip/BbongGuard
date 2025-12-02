@@ -4,6 +4,7 @@ from ..shared.schemas import Claim, AudioSegment
 
 class AudioAnalysisRequest(BaseModel):
     video_id: str
+    title: str = ""  # [New] 제목 낚시 탐지를 위해 추가
     claims: List[Claim]
 
 class ClaimVerdict(BaseModel):

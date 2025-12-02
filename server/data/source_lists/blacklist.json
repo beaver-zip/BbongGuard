@@ -1,0 +1,31 @@
+{
+  "description": "신뢰할 수 없는 출처 - 검색 결과에서 제외",
+  "domains": [
+    "youtube.com",
+    "youtu.be",
+    "blog.naver.com",
+    "blog.daum.net",
+    "tistory.com",
+    "cafe.naver.com",
+    "cafe.daum.net",
+    "dcinside.com",
+    "fmkorea.com",
+    "mlbpark.donga.com",
+    "inven.co.kr",
+    "ilbe.com",
+    "instiz.net",
+    "theqoo.net",
+    "ruliweb.com",
+    "clien.net/service/board",
+    "todayhumor.co.kr",
+    "ppomppu.co.kr",
+    "slrclub.com",
+    "bobaedream.co.kr"
+  ],
+  "reasons": [
+    "개인 블로그 - 검증되지 않은 정보",
+    "커뮤니티 - 익명 게시글",
+    "YouTube - 순환 참조 방지",
+    "게시판 - 사용자 생성 콘텐츠"
+  ]
+}

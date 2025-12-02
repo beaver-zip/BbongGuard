@@ -45,13 +45,13 @@ app = FastAPI(
 # CORS 설정
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 실제 배포 시에는 구체적인 도메인으로 제한 권장
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# 모듈 인스턴스 (싱글톤처럼 사용)
+# 모듈 인스턴스 (싱글톤)
 text_analyzer = TextAnalyzer()
 image_analyzer = ImageAnalyzer()
 audio_analyzer = AudioAnalyzer()
@@ -66,9 +66,7 @@ async def health_check():
 
 @app.post("/api/analyze-rag", response_model=TextModuleResult)
 async def analyze_video_text(request: TextAnalysisRequest):
-    """
-    (Legacy) 텍스트 기반 RAG 분석 엔드포인트
-    """
+    """(Legacy) 텍스트 기반 RAG 분석 엔드포인트"""
     try:
         logger.info(f"텍스트 분석 요청 수신: {request.video_id}")
         result = await text_analyzer.analyze(request)
@@ -87,29 +85,25 @@ async def analyze_video_multimodal(request: TextAnalysisRequest):
         logger.info(f"멀티모달 분석 요청 수신: {request.video_id}")
         
         # 1. 텍스트 모듈 실행 (Claim 추출 및 1차 팩트체크)
-        # 이미지/오디오 모듈은 Claim이 필요하므로 텍스트 모듈이 먼저 실행되어야 함
-        # (최적화를 위해 Claim 추출만 먼저 하고 병렬 처리할 수도 있으나, 여기서는 순차 진행 후 병렬)
-        
+        # RAG 시스템이 핵심 주장을 먼저 추출해야 다른 모듈이 검증할 수 있습니다.
         text_result = await text_analyzer.analyze(request)
         
-        # VideoMeta 및 Claims 변환
+        # VideoMeta 생성 (메타데이터용)
         video_meta = VideoMeta(
             video_id=request.video_id,
             url=f"https://www.youtube.com/watch?v={request.video_id}",
-            duration_sec=request.duration_sec,  # 영상 길이 설정
-            transcript=[{'text': request.transcript, 'start': 0, 'end': 0, 'duration': 0}] if request.transcript else []
-            # 주의: request.transcript가 단순 문자열이라 상세 타임스탬프 정보가 없을 수 있음.
-            # 실제로는 YouTube API에서 상세 자막을 받아와야 함.
+            duration_sec=request.duration_sec,
+            transcript=[] # 자막은 TextAnalyzer 내부에서 처리하므로 여기선 생략 가능
         )
         
-        # TextAnalyzer 결과에서 Claims 복원 (ClaimVerdict -> Claim)
+        # TextAnalyzer 결과에서 Claims 추출 및 변환
         claims = []
         for cv in text_result.claims:
             claims.append(Claim(
                 claim_id=cv.claim_id,
                 claim_text=cv.claim_text,
                 category=cv.category,
-                importance="High" # 기본값
+                importance="High"
             ))
             
         if not claims:
@@ -120,24 +114,31 @@ async def analyze_video_multimodal(request: TextAnalysisRequest):
                 final_verdict=FinalVerdict(
                     is_fake_news=False,
                     confidence_level="low",
-                    overall_reasoning="분석할 주장이 발견되지 않았습니다.",
-                    recommendation="영상 내용이 불충분하거나 분석할 수 없습니다."
+                    overall_reasoning="분석할 주장이 발견되지 않았습니다. (영상 설명이나 자막이 부족할 수 있습니다)",
+                    recommendation="정보가 부족하여 판단을 유보합니다."
                 )
             )
 
         # 2. 이미지/오디오 모듈 병렬 실행
-        # 오디오 파일 경로가 없으므로 오디오 모듈은 자막 분석 위주로 동작하거나, 내부에서 다운로드 시도
+        # 각 모듈에 필요한 요청 객체 생성
+        image_request = ImageAnalysisRequest(
+            video_id=request.video_id, 
+            claims=claims
+        )
         
-        image_request = ImageAnalysisRequest(video_id=request.video_id, claims=claims)
-        audio_request = AudioAnalysisRequest(video_id=request.video_id, claims=claims)
+        audio_request = AudioAnalysisRequest(
+            video_id=request.video_id, 
+            title=request.title,  # [New] 제목 낚시 탐지용
+            claims=claims
+        )
         
-        # 비동기 병렬 실행
+        # 비동기 병렬 실행 (Image: Google Vision, Audio: Naver Cloud)
         image_task = asyncio.create_task(image_analyzer.analyze(image_request))
         audio_task = asyncio.create_task(audio_analyzer.analyze(audio_request))
         
         image_result, audio_result = await asyncio.gather(image_task, audio_task)
         
-        # 3. 최종 통합 판단
+        # 3. 최종 통합 판단 (Verdict Agent)
         final_verdict = await verdict_agent.aggregate_multimodal_verdicts(
             video_meta=video_meta,
             claims=claims,

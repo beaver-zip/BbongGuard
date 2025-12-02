@@ -39,3 +39,8 @@ pillow>=10.0.0           # 이미지 처리
 librosa>=0.10.0          # 오디오 분석
 soundfile>=0.12.0        # 오디오 파일 처리
 openai-whisper>=20231117 # 음성 인식 (자막 추출)
+
+
+# Google Cloud Vision API
+google-cloud-vision>=3.4.0
+requests>=2.31.0
