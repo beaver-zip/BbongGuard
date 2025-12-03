@@ -94,16 +94,35 @@ class VerdictAgent:
         try:
             llm_client = await get_llm_client()
 
-            # 1. Claim별 데이터 취합
+            # 1. Claim별 데이터 취합 및 텍스트 출처 정보 수집
             claims_summary = ""
+            text_sources_info = []  # 텍스트 모듈에서 사용한 출처 정보
+            
             for i, claim in enumerate(claims, 1):
                 # 텍스트 판정
                 t_verdict = next((v for v in text_verdicts if v.claim_id == claim.claim_id), None)
                 t_result = "판정 불가"
                 t_reason = "근거 없음"
+                evidence_sources = []
+                
                 if t_verdict:
                     t_result = "가짜" if t_verdict.is_fake else "사실"
                     t_reason = t_verdict.verdict_reason
+                    
+                    # Evidence에서 출처 URL 추출
+                    evidence_sources = [
+                        f"[{ev.source_title}]({ev.source_url})" 
+                        for ev in t_verdict.evidence
+                    ]
+                    
+                    # 텍스트 출처 정보 저장 (판단 근거와 출처)
+                    if t_verdict.evidence:
+                        for ev in t_verdict.evidence:
+                            text_sources_info.append({
+                                "reason": t_reason,
+                                "title": ev.source_title,
+                                "url": ev.source_url
+                            })
                 
                 # 이미지 결과 (자극성)
                 img_res = next((r for r in image_results.get("claims", []) if r["claim_id"] == claim.claim_id), {})
@@ -115,9 +134,13 @@ class VerdictAgent:
                 # notes에 선동 요약이 들어있음
                 aud_summary = aud_res.get("notes", ["분석 없음"])[0]
 
+                # 출처 정보 포함
+                evidence_str = ", ".join(evidence_sources) if evidence_sources else "출처 없음"
+                
                 claims_summary += f"""
 Claim {i}: "{claim.claim_text}"
 - 텍스트 팩트체크: {t_result} (근거: {t_reason})
+  출처: {evidence_str}
 - 이미지 분석 (자극성): {img_summary}
 - 오디오 분석 (선동성): {aud_summary}
 """
@@ -163,6 +186,7 @@ Claim {i}: "{claim.claim_text}"
                 image_analysis_summary=result.get("image_analysis_summary", ""),
                 audio_analysis_summary=result.get("audio_analysis_summary", ""),
                 key_evidence=result.get("key_evidence", []),
+                text_sources=text_sources_info,
                 recommendation=result.get("recommendation", "정보 확인 필요")
             )
 
@@ -178,7 +202,7 @@ Claim {i}: "{claim.claim_text}"
 
     def aggregate_verdicts(self, verdicts: List[ClaimVerdict]) -> dict:
         """
-        (Legacy) 텍스트 모듈 전용 집계 함수 - 하위 호환성 유지
+        텍스트 모듈 전용 집계 함수
         """
         if not verdicts:
             return {

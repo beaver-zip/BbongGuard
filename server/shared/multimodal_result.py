@@ -37,6 +37,9 @@ class FinalVerdict(BaseModel):
 
     # 핵심 판단 근거
     key_evidence: List[str] = Field(default_factory=list)
+    
+    # 텍스트 모듈 출처 (판단 근거와 URL 쌍)
+    text_sources: List[dict] = Field(default_factory=list)  # [{"reason": "...", "url": "..."}]
 
     # 사용자 권장 사항
     recommendation: str

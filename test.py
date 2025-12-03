@@ -84,6 +84,13 @@ def run_test():
             print(f"🖼️ 이미지(재사용/조작): {verdict['image_analysis_summary']}")
             print(f"🔊 오디오(낚시/불일치): {verdict['audio_analysis_summary']}")
             
+            if verdict.get('text_sources'):
+                print("\n" + "-"*30)
+                print("[📚 텍스트 모듈 출처]")
+                print("-"*30)
+                for idx, source in enumerate(verdict['text_sources'], 1):
+                    print(f"{idx}. [{source['title']}]({source['url']})")
+            
             print(f"\n⏱ 총 소요 시간: {end_time - start_time:.2f}초")
             
         else:
