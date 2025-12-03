@@ -15,8 +15,6 @@ from .claim_extractor import extract_claims_from_video
 from .web_searcher import WebSearcher
 from .evidence_ranker import EvidenceRanker
 from .verdict_agent import VerdictAgent
-# [삭제] youtube_client 임포트 불필요
-# from ..shared.youtube_client import get_youtube_client 
 from ..shared.logger_utils import log_execution
 
 logger = logging.getLogger(__name__)
@@ -84,12 +82,7 @@ class TextAnalyzer:
                 return self._create_error_result(request.video_id, "모든 주장 검증 실패", start_time)
 
             # 3단계: 판정 통합
-            logger.info("Step 3/4: 판정 통합")
-            # VerdictAgent는 text_module 패키지 내부에 있으므로 self.verdict_agent 사용
-            # 하지만 aggregate_verdicts는 구형 메서드일 수 있음. 
-            # 여기서는 TextModuleResult를 만드는 과정이므로 기존 로직 유지.
-            # (멀티모달 통합은 main.py의 aggregate_multimodal_verdicts에서 수행됨)
-            
+            logger.info("Step 3/4: 판정 통합")            
             aggregated = self.verdict_agent.aggregate_verdicts(valid_verdicts)
 
             # 4단계: Finding 변환 및 최종 결과 생성

@@ -33,7 +33,6 @@ class WebSearcher:
         주장에 대해 Tavily 웹 검색을 수행합니다.
         """
         try:
-            # [수정] QueryBuilder가 비동기(async)이므로 반드시 await를 붙여야 함!
             query = await self.query_builder.build_search_query(claim)
 
             logger.info(f"웹 검색 시작: {query}")
