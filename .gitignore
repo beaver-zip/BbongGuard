@@ -59,3 +59,8 @@ server/data/chromadb/
 
 # UML diagrams
 UMLdiagrams/
+
+# Excluded files
+google_service-account-key.json
+test_category.py
+test.py
