@@ -25,6 +25,7 @@ header {
   color: white;
   padding: 20px;
   text-align: center;
+  position: relative; /* For absolute positioning of settings button */
 }
 
 header h1 {
@@ -35,6 +36,24 @@ header h1 {
 .subtitle {
   font-size: 14px;
   opacity: 0.9;
+}
+
+#settings-btn {
+  position: absolute;
+  top: 15px;
+  right: 15px;
+  background: transparent;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  padding: 5px;
+  transition: transform 0.2s ease;
+  opacity: 0.8;
+}
+
+#settings-btn:hover {
+  transform: rotate(90deg);
+  opacity: 1;
 }
 
 main {
@@ -113,49 +132,120 @@ main {
   justify-content: flex-start;
 }
 
-.result-header h2 {
-  font-size: 20px;
+/* Tabs */
+.tabs {
+  display: flex;
+  width: 100%;
+  border-bottom: 2px solid #e5e7eb;
   margin-bottom: 20px;
-  color: #1f2937;
 }
 
-.probability-section {
-  margin-bottom: 30px;
-}
-
-.probability-label {
+.tab-btn {
+  flex: 1;
+  padding: 12px;
+  background: none;
+  border: none;
   font-size: 14px;
   font-weight: 600;
   color: #6b7280;
-  margin-bottom: 10px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
 }
 
-.probability-bar {
-  width: 100%;
-  height: 30px;
-  background: #e5e7eb;
-  border-radius: 15px;
-  overflow: hidden;
-  margin-bottom: 10px;
+.tab-btn.active {
+  color: #667eea;
+  border-bottom: 2px solid #667eea;
 }
 
-.probability-fill {
-  height: 100%;
-  background: linear-gradient(90deg, #10b981 0%, #fbbf24 50%, #ef4444 100%);
-  transition: width 0.5s ease;
+.tab-btn:hover:not(.active) {
+  color: #374151;
+  background-color: #f9fafb;
+}
+
+.tab-content {
+  display: none;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.tab-content.active {
+  display: block;
+  animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Verdict Container */
+.verdict-container {
+  padding: 20px;
+  border-radius: 12px;
+  text-align: center;
+  margin-bottom: 25px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+.verdict-container.fake {
+  background-color: #fef2f2;
+  border: 1px solid #fee2e2;
+  color: #991b1b;
+}
+
+.verdict-container.real {
+  background-color: #ecfdf5;
+  border: 1px solid #d1fae5;
+  color: #065f46;
+}
+
+.verdict-icon {
+  font-size: 32px;
+  margin-bottom: 10px;
+  display: block;
+}
+
+.verdict-text {
+  font-size: 18px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.overall-reasoning {
+  font-size: 14px;
+  line-height: 1.6;
+  color: #374151;
+  background: #f3f4f6;
+  padding: 15px;
+  border-radius: 8px;
+  border-left: 4px solid #667eea;
+}
+
+/* Module Details */
+.module-detail {
+  margin-bottom: 20px;
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 15px;
+}
+
+.module-detail h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1f2937;
+  margin-bottom: 10px;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  padding-right: 10px;
-  color: white;
-  font-weight: 600;
+  gap: 8px;
 }
 
-.probability-text {
-  font-size: 24px;
-  font-weight: 700;
-  text-align: center;
-  color: #1f2937;
+.detail-text {
+  font-size: 13px;
+  line-height: 1.5;
+  color: #4b5563;
 }
 
 .evidence-section {
@@ -168,20 +258,7 @@ main {
   color: #374151;
 }
 
-.evidence-list {
-  list-style: none;
-  padding: 0;
-}
 
-.evidence-list li {
-  padding: 10px;
-  margin-bottom: 8px;
-  background: #f9fafb;
-  border-radius: 6px;
-  font-size: 14px;
-  color: #4b5563;
-  border-left: 3px solid #667eea;
-}
 
 .video-info {
   margin-bottom: 20px;
@@ -243,4 +320,90 @@ footer {
 .footer-text {
   font-size: 12px;
   color: #9ca3af;
+}
+
+/* Module Summaries */
+.module-summaries {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.summary-item {
+  background: #f9fafb;
+  padding: 12px;
+  border-radius: 8px;
+  border-left: 3px solid #667eea;
+}
+
+.summary-item h4 {
+  font-size: 13px;
+  margin-bottom: 5px;
+  color: #4b5563;
+}
+
+.summary-item p {
+  font-size: 14px;
+  color: #1f2937;
+  line-height: 1.4;
+}
+
+/* Text Analysis Details */
+.detail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.claim-item {
+  background: #f9fafb;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+}
+
+.claim-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.claim-status {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.claim-status.true {
+  background-color: #ecfdf5;
+  color: #065f46;
+}
+
+.claim-status.false {
+  background-color: #fef2f2;
+  color: #991b1b;
+}
+
+.claim-status.unknown {
+  background-color: #f3f4f6;
+  color: #4b5563;
+}
+
+.claim-text {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1f2937;
+  line-height: 1.4;
+}
+
+.claim-reason {
+  font-size: 13px;
+  color: #4b5563;
+  line-height: 1.5;
+  padding-left: 5px;
+  border-left: 2px solid #d1d5db;
 }

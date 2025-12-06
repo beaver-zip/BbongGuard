@@ -40,39 +40,96 @@ function showError(message) {
 
 // 결과 표시
 function showResult(data) {
-  // 가짜뉴스 확률 표시 (0~1 범위를 0~100%로 변환)
-  const probabilityRaw = data.fakeProbability || 0;
-  const probability = probabilityRaw * 100;  // 0.7838 → 78.38
-  const probabilityFill = document.getElementById('probability-fill');
-  const probabilityText = document.getElementById('probability-text');
+  // 탭 전환 로직
+  const tabBtns = document.querySelectorAll('.tab-btn');
+  const tabContents = document.querySelectorAll('.tab-content');
 
-  probabilityFill.style.width = `${probability}%`;
-  probabilityText.textContent = `${probability.toFixed(1)}%`;
+  tabBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      // 모든 탭 비활성화
+      tabBtns.forEach(b => b.classList.remove('active'));
+      tabContents.forEach(c => c.classList.remove('active'));
 
-  // 확률에 따른 색상 변경
-  if (probability < 30) {
-    probabilityText.style.color = '#10b981'; // 녹색
-  } else if (probability < 70) {
-    probabilityText.style.color = '#fbbf24'; // 노란색
+      // 선택된 탭 활성화
+      btn.classList.add('active');
+      const tabId = btn.dataset.tab;
+      document.getElementById(`tab-${tabId}`).classList.add('active');
+    });
+  });
+
+  // Verdict 표시
+  const verdict = data.verdict;
+  const verdictContainer = document.getElementById('verdict-container');
+  
+  // 초기화
+  verdictContainer.className = 'verdict-container';
+  verdictContainer.innerHTML = '';
+
+  if (verdict.is_fake_news) {
+    verdictContainer.classList.add('fake');
+    verdictContainer.innerHTML = `
+      <span class="verdict-icon">⚠️</span>
+      <p class="verdict-text">가짜뉴스일 가능성이 높습니다</p>
+    `;
   } else {
-    probabilityText.style.color = '#ef4444'; // 빨간색
+    verdictContainer.classList.add('real');
+    verdictContainer.innerHTML = `
+      <span class="verdict-icon">✅</span>
+      <p class="verdict-text">진짜 뉴스일 가능성이 높습니다</p>
+    `;
+  }
+
+  // 종합 근거 표시
+  const overallReasoning = document.getElementById('overall-reasoning');
+  overallReasoning.textContent = verdict.overall_reasoning || "판단 근거가 제공되지 않았습니다.";
+
+  // 상세 근거 (모듈별 요약) 표시
+  document.getElementById('text-analysis-summary').textContent = verdict.text_analysis_summary || "분석 결과 없음";
+  document.getElementById('image-analysis-summary').textContent = verdict.image_analysis_summary || "분석 결과 없음";
+  document.getElementById('audio-analysis-summary').textContent = verdict.audio_analysis_summary || "분석 결과 없음";
+
+  // [New] 상세 분석 내용 표시 (Details Tab)
+  document.getElementById('image-analysis-details').textContent = verdict.image_analysis_details || "상세 분석 결과가 없습니다.";
+  document.getElementById('audio-analysis-details').textContent = verdict.audio_analysis_details || "상세 분석 결과가 없습니다.";
+
+  // [New] 텍스트 상세 분석 (Claims) 표시
+  const textDetailsContainer = document.getElementById('text-analysis-details');
+  textDetailsContainer.innerHTML = ''; // 초기화
+
+  if (data.text_result && data.text_result.claims && data.text_result.claims.length > 0) {
+    data.text_result.claims.forEach(claim => {
+      const claimItem = document.createElement('div');
+      claimItem.className = 'claim-item';
+      
+      let statusIcon = '❓';
+      let statusClass = 'unknown';
+      let statusText = '판단 불가';
+
+      if (claim.verdict_status === 'verified_true') {
+        statusIcon = '✅';
+        statusClass = 'true';
+        statusText = '사실';
+      } else if (claim.verdict_status === 'verified_false') {
+        statusIcon = '❌';
+        statusClass = 'false';
+        statusText = '거짓';
+      }
+
+      claimItem.innerHTML = `
+        <div class="claim-header">
+          <span class="claim-status ${statusClass}">${statusIcon} ${statusText}</span>
+          <p class="claim-text">${claim.claim_text}</p>
+        </div>
+        <p class="claim-reason">${claim.verdict_reason || '근거가 제공되지 않았습니다.'}</p>
+      `;
+      textDetailsContainer.appendChild(claimItem);
+    });
+  } else {
+    textDetailsContainer.innerHTML = '<p class="detail-text">추출된 주장이 없습니다.</p>';
   }
 
   // 근거 표시
-  const evidenceList = document.getElementById('evidence-list');
-  evidenceList.innerHTML = '';
 
-  if (data.evidence && data.evidence.length > 0) {
-    data.evidence.forEach(item => {
-      const li = document.createElement('li');
-      li.textContent = item;
-      evidenceList.appendChild(li);
-    });
-  } else {
-    const li = document.createElement('li');
-    li.textContent = '분석 근거가 제공되지 않았습니다.';
-    evidenceList.appendChild(li);
-  }
 
   // 영상 정보 표시
   const videoDetails = document.getElementById('video-details');
@@ -82,6 +139,45 @@ function showResult(data) {
     <p><strong>조회수:</strong> ${data.videoInfo?.viewCount ? Number(data.videoInfo.viewCount).toLocaleString() : 'N/A'}</p>
     <p><strong>업로드:</strong> ${data.videoInfo?.publishedAt ? new Date(data.videoInfo.publishedAt).toLocaleDateString('ko-KR') : 'N/A'}</p>
   `;
+
+  // [New] 텍스트 출처 표시
+  const existingSources = document.getElementById('sources-section');
+  if (existingSources) existingSources.remove();
+
+  if (data.textSources && data.textSources.length > 0) {
+    const sourcesSection = document.createElement('div');
+    sourcesSection.id = 'sources-section';
+    sourcesSection.className = 'evidence-section'; // 스타일 재사용
+    sourcesSection.style.marginTop = '15px';
+    
+    const h3 = document.createElement('h3');
+    h3.textContent = '참고 출처';
+    sourcesSection.appendChild(h3);
+    
+    const ul = document.createElement('ul');
+    ul.className = 'evidence-list';
+    
+    data.textSources.forEach(source => {
+      const li = document.createElement('li');
+      const link = document.createElement('a');
+      link.href = source.url;
+      link.textContent = source.title || source.url;
+      link.target = '_blank'; // 새 탭에서 열기
+      link.style.color = '#3b82f6'; // 링크 색상 (파란색)
+      link.style.textDecoration = 'underline';
+      
+      li.appendChild(link);
+      ul.appendChild(li);
+    });
+    
+    sourcesSection.appendChild(ul);
+    
+    // evidence-section 뒤에 추가
+    const evidenceSection = document.querySelector('.evidence-section');
+    if (evidenceSection && evidenceSection.parentNode) {
+        evidenceSection.parentNode.insertBefore(sourcesSection, evidenceSection.nextSibling);
+    }
+  }
 
   showState('result');
 }
@@ -151,6 +247,15 @@ async function analyzeVideo() {
 buttons.analyze.addEventListener('click', analyzeVideo);
 buttons.reanalyze.addEventListener('click', analyzeVideo);
 buttons.retry.addEventListener('click', analyzeVideo);
+
+// 설정 버튼 이벤트 리스너
+document.getElementById('settings-btn').addEventListener('click', () => {
+  if (chrome.runtime.openOptionsPage) {
+    chrome.runtime.openOptionsPage();
+  } else {
+    window.open(chrome.runtime.getURL('options/options.html'));
+  }
+});
 
 // 팝업 열릴 때 초기 상태 확인
 document.addEventListener('DOMContentLoaded', async () => {

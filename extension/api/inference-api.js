@@ -18,33 +18,22 @@ async function getInferenceServerUrl() {
 async function analyzeWithInferenceServer(videoData) {
   try {
     const serverUrl = await getInferenceServerUrl();
-    const endpoint = `${serverUrl}/api/analyze`;
+    const endpoint = `${serverUrl}/api/analyze-multimodal`; // [수정] 엔드포인트 변경
 
-    // 서버로 전송할 데이터 구조화
+    // 서버로 전송할 데이터 구조화 (snake_case 적용)
     const payload = {
-      videoId: videoData.videoId,
+      video_id: videoData.videoId,
       title: videoData.title,
       description: videoData.description || "",
-      channelTitle: videoData.channelTitle,
-      views: parseInt(videoData.viewCount) || 0,  // viewCount → views, 정수 변환
-      likes: parseInt(videoData.likeCount) || 0,  // likeCount → likes, 정수 변환
-      thumbnailUrl: videoData.thumbnailUrl,
-      // 댓글 객체 배열을 문자열 배열로 변환
       comments: (videoData.comments || []).map(comment =>
         typeof comment === 'string' ? comment : comment.text
-      ).slice(0, 100),  // 최대 100개
-      relatedVideos: (videoData.relatedVideos || []).map(video => ({
-        videoId: video.videoId,
-        title: video.title || "",
-        description: video.description || "",
-        channelTitle: video.channelTitle || null,
-        thumbnailUrl: video.thumbnailUrl || null
-      })),
-      tags: videoData.tags || []
+      ).slice(0, 100),
+      duration_sec: videoData.durationSec || 0, // [New]
+      // 추가 정보 (서버 로깅용)
+      channel_title: videoData.channelTitle,
+      views: parseInt(videoData.viewCount) || 0,
+      thumbnail_url: videoData.thumbnailUrl
     };
-
-    // TODO: 썸네일 이미지를 base64로 인코딩하여 전송하는 로직 추가 가능
-    // 현재는 썸네일 URL만 전송
 
     const response = await fetch(endpoint, {
       method: 'POST',
@@ -56,16 +45,26 @@ async function analyzeWithInferenceServer(videoData) {
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.message || `추론 서버 응답 오류 (${response.status})`);
+      throw new Error(errorData.detail || errorData.message || `추론 서버 응답 오류 (${response.status})`);
     }
 
     const result = await response.json();
+    const verdict = result.final_verdict;
+
+    // 가짜뉴스 확률 매핑 (is_fake_news 기반)
+    let probability = 0.1;
+    if (verdict.is_fake_news) {
+        probability = verdict.confidence_level === 'high' ? 0.95 : 0.8;
+    } else {
+        probability = verdict.confidence_level === 'high' ? 0.05 : 0.2;
+    }
 
     // 응답 데이터 검증 및 정규화
     return {
-      probability: result.fakeProbability ?? result.probability ?? 0,
-      evidence: result.evidence || [],
-      details: result.details || null
+      probability: probability,
+      evidence: verdict.key_evidence && verdict.key_evidence.length > 0 ? verdict.key_evidence : [verdict.overall_reasoning],
+      textSources: verdict.text_sources || [], // [New] 텍스트 출처
+      details: verdict
     };
 
   } catch (error) {
