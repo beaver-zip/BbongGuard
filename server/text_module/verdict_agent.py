@@ -3,12 +3,13 @@
 import logging
 from typing import List, Dict, Any
 import time
-import json
 
 from ..shared.schemas import Claim, VideoMeta
-from ..shared.rag_models import Evidence, ClaimVerdict, FinalVerdict
+from ..shared.text_module import Evidence, ClaimVerdict
+from ..shared.multimodal_result import FinalVerdict
 from ..shared.llm_client import get_llm_client
 from ..shared.logger_utils import log_execution
+from ..resources.prompts import get_verdict_agent_prompt, get_claim_judgment_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -26,44 +27,65 @@ class VerdictAgent:
         evidence_list: List[Evidence]
     ) -> ClaimVerdict:
         """
-        증거를 기반으로 주장의 진위를 판정합니다.
-        """
-        start_time = time.time()
+        단일 주장에 대해 증거를 바탕으로 진위를 판정합니다.
 
+        LLM을 사용하여 증거와 주장 간의 일치 여부를 분석하고 판정 결과를 생성합니다.
+
+        Args:
+            claim (Claim): 판정할 주장.
+            evidence_list (List[Evidence]): 관련 증거 목록.
+
+        Returns:
+            ClaimVerdict: 판정 결과 (진실/거짓/판정불가 및 이유).
+        """
         try:
             llm_client = await get_llm_client()
-            evidence_dicts = [ev.model_dump() for ev in evidence_list]
-
-            # LLM 판정 (verdict_status 반환)
-            judgment = await llm_client.judge_claim(
-                claim=claim.claim_text,
-                evidence_list=evidence_dicts
-            )
-
-            verdict_status = judgment.get('verdict_status', 'insufficient_evidence')
-            verdict_reason = judgment.get('reason', '판정 근거 없음')
             
-            # verdict_status를 is_fake로 변환 (하위 호환성)
-            is_fake = (verdict_status == "verified_false")
+            # 증거가 없으면 바로 insufficient_evidence 반환
+            if not evidence_list:
+                return ClaimVerdict(
+                    claim_id=claim.claim_id,
+                    claim_text=claim.claim_text,
+                    category=claim.category,
+                    is_fake=False,
+                    verdict_reason="관련 증거를 찾지 못했습니다.",
+                    evidence=[],
+                    processing_time_ms=0
+                )
 
-            verdict = ClaimVerdict(
+            # Evidence 포맷팅 (출처 강조)
+            evidence_text = ""
+            for i, ev in enumerate(evidence_list, 1):
+                domain = ev.domain
+                source_title = ev.source_title
+                snippet = ev.snippet
+
+                evidence_text += f"\n{i}. [{domain}] {source_title}\n"
+                evidence_text += f"   내용: {snippet}\n"
+
+            prompt = get_claim_judgment_prompt(claim.claim_text, evidence_text)
+            messages = [{"role": "user", "content": prompt}]
+            
+            result = await llm_client.chat_completion_json(messages)
+            
+            verdict_status = result.get('verdict_status', 'insufficient_evidence')
+            # 유효성 검사
+            if verdict_status not in ["verified_true", "verified_false", "insufficient_evidence"]:
+                verdict_status = "insufficient_evidence"
+            
+            reason = result.get('reason', '판정 이유 없음')
+
+            is_fake = (verdict_status == "verified_false")
+            
+            return ClaimVerdict(
                 claim_id=claim.claim_id,
                 claim_text=claim.claim_text,
                 category=claim.category,
-                verdict_status=verdict_status,
                 is_fake=is_fake,
-                verdict_reason=verdict_reason,
+                verdict_reason=reason,
                 evidence=evidence_list,
-                processing_time_ms=(time.time() - start_time) * 1000
+                processing_time_ms=0 # 상위에서 계산
             )
-
-            status_kr = {
-                'verified_true': '사실', 
-                'verified_false': '가짜', 
-                'insufficient_evidence': '검증불가'
-            }[verdict_status]
-            logger.info(f"주장 판정 완료: {claim.claim_text[:50]}... -> {status_kr}")
-            return verdict
 
         except Exception as e:
             logger.error(f"주장 판정 실패: {e}", exc_info=True)
@@ -75,7 +97,7 @@ class VerdictAgent:
                 is_fake=False,
                 verdict_reason=f"판정 중 오류 발생: {str(e)}",
                 evidence=evidence_list,
-                processing_time_ms=(time.time() - start_time) * 1000
+                processing_time_ms=0
             )
 
     @log_execution(module_name="integration", step_name="final_verdict")
@@ -90,6 +112,16 @@ class VerdictAgent:
         """
         텍스트, 이미지, 오디오 분석 결과를 종합하여 최종 판단을 내립니다.
         (자극성 및 감정적 선동 여부 반영)
+
+        Args:
+            video_meta (VideoMeta): 영상 메타데이터.
+            claims (List[Claim]): 추출된 주장 목록.
+            text_verdicts (List[ClaimVerdict]): 텍스트 팩트체크 결과.
+            image_results (Dict[str, Any]): 이미지 분석 결과.
+            audio_results (Dict[str, Any]): 오디오 분석 결과.
+
+        Returns:
+            FinalVerdict: 종합 판정 결과.
         """
         try:
             llm_client = await get_llm_client()
@@ -118,11 +150,13 @@ class VerdictAgent:
                     # 텍스트 출처 정보 저장 (판단 근거와 출처)
                     if t_verdict.evidence:
                         for ev in t_verdict.evidence:
-                            text_sources_info.append({
-                                "reason": t_reason,
-                                "title": ev.source_title,
-                                "url": ev.source_url
-                            })
+                            # 중복 제거 (URL 기준)
+                            if not any(s['url'] == ev.source_url for s in text_sources_info):
+                                text_sources_info.append({
+                                    "reason": t_reason,
+                                    "title": ev.source_title,
+                                    "url": ev.source_url
+                                })
                 
                 # 이미지 결과 (자극성)
                 img_res = next((r for r in image_results.get("claims", []) if r["claim_id"] == claim.claim_id), {})
@@ -139,40 +173,20 @@ class VerdictAgent:
                 
                 claims_summary += f"""
 Claim {i}: "{claim.claim_text}"
-- 텍스트 팩트체크: {t_result} (근거: {t_reason})
-  출처: {evidence_str}
-- 이미지 분석 (자극성): {img_summary}
-- 오디오 분석 (선동성): {aud_summary}
+
+[핵심 검증: 텍스트]
+- 판정: {t_result}
+- 근거: {t_reason}
+- 출처: {evidence_str}
+
+[보조 분석: 이미지/오디오]
+- 이미지(썸네일): {img_summary}
+- 오디오(선동성): {aud_summary}
+--------------------------------------------------
 """
 
             # 2. LLM 종합 판단 요청
-            prompt = f"""당신은 멀티모달 가짜뉴스 판별 전문가입니다. 다음 영상의 분석 결과를 종합하여 최종 판단을 내리세요.
-
-영상 제목: {video_meta.url} (ID: {video_meta.video_id})
-
-각 주장에 대한 모듈별 분석 결과:
-{claims_summary}
-
-판단 가이드:
-1. **텍스트 팩트체크**가 가장 중요합니다. 팩트체크 결과가 '가짜'라면 가짜뉴스일 확률이 매우 높습니다.
-2. **이미지/오디오**는 '자극성'과 '선동성'을 분석했습니다.
-   - 팩트체크가 '사실'이어도 이미지/오디오가 매우 자극적이라면 "낚시성/과장된 콘텐츠(Clickbait)"로 판단하세요.
-   - 팩트체크가 '가짜'이고 이미지/오디오도 자극적/선동적이라면 "악의적인 가짜뉴스(Malicious Fake News)"로 강력히 경고하세요.
-   - 팩트체크가 '가짜'인데 이미지/오디오가 차분하다면 "단순 오정보(Misinformation)"일 수 있습니다.
-
-3. **종합 결론**: 영상 전체가 시청자에게 해로운지, 단순 흥미 위주인지, 아니면 유익한지 판단하세요.
-
-출력 형식 (JSON):
-{{
-  "is_fake_news": true/false,
-  "confidence_level": "high/medium/low",
-  "overall_reasoning": "종합적인 판단 이유 (3문장 내외)",
-  "text_analysis_summary": "텍스트 모듈 요약",
-  "image_analysis_summary": "이미지 모듈 요약 (자극성 위주)",
-  "audio_analysis_summary": "오디오 모듈 요약 (선동성 위주)",
-  "key_evidence": ["핵심 근거 1", "핵심 근거 2"],
-  "recommendation": "사용자에게 주는 권장 사항"
-}}"""
+            prompt = get_verdict_agent_prompt(video_meta, claims_summary)
 
             messages = [{"role": "user", "content": prompt}]
             
@@ -185,6 +199,8 @@ Claim {i}: "{claim.claim_text}"
                 text_analysis_summary=result.get("text_analysis_summary", ""),
                 image_analysis_summary=result.get("image_analysis_summary", ""),
                 audio_analysis_summary=result.get("audio_analysis_summary", ""),
+                image_analysis_details=result.get("image_analysis_details", ""),
+                audio_analysis_details=result.get("audio_analysis_details", ""),
                 key_evidence=result.get("key_evidence", []),
                 text_sources=text_sources_info,
                 recommendation=result.get("recommendation", "정보 확인 필요")
@@ -202,7 +218,14 @@ Claim {i}: "{claim.claim_text}"
 
     def aggregate_verdicts(self, verdicts: List[ClaimVerdict]) -> dict:
         """
-        텍스트 모듈 전용 집계 함수
+        텍스트 모듈 전용 집계 함수.
+        개별 주장 판정 결과를 종합하여 텍스트 모듈의 전체 결과를 생성합니다.
+
+        Args:
+            verdicts (List[ClaimVerdict]): 개별 주장 판정 결과 리스트.
+
+        Returns:
+            dict: 집계 결과 (is_fake_news, summary, total_claims, fake_claims_count).
         """
         if not verdicts:
             return {

@@ -1,11 +1,13 @@
 from pydantic import BaseModel
-from typing import List, Dict, Any, Optional
+from typing import List, Optional
 from ..shared.schemas import Claim, AudioSegment
 
 class AudioAnalysisRequest(BaseModel):
     video_id: str
-    title: str = ""  # [New] 제목 낚시 탐지를 위해 추가
-    claims: List[Claim]
+    title: str = "" 
+    description: str = ""
+    claims: List[Claim] = []
+    transcript: Optional[str] = None
 
 class ClaimVerdict(BaseModel):
     claim_id: str
@@ -21,3 +23,4 @@ class AudioModuleResult(BaseModel):
     processing_time_ms: float
     status: str
     error_message: Optional[str] = None
+    transcript: Optional[str] = None

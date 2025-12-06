@@ -5,8 +5,9 @@ from typing import List, Dict, Any
 import uuid
 
 from ..shared.llm_client import get_llm_client
-from ..shared.rag_models import Claim
+from ..shared.text_module import Claim
 from ..config import Config
+from ..resources.prompts import get_claim_extraction_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -23,37 +24,50 @@ class ClaimExtractor:
         self,
         title: str,
         description: str,
-        comments: List[str],
         transcript: str = None,
         max_claims: int = None
     ) -> List[Claim]:
         """
-        영상의 제목, 설명, 댓글, 자막에서 팩트체킹이 필요한 주장을 추출합니다.
+        영상의 제목, 설명, 자막에서 팩트체킹이 필요한 주장을 추출합니다.
 
         LLM을 사용하여 검증 가능한 사실 주장을 식별하고 구조화합니다.
 
         Args:
-            title: 영상 제목
-            description: 영상 설명
-            comments: 댓글 목록
-            transcript: 자막 텍스트 (선택)
-            max_claims: 최대 추출 개수 (None이면 Config 기본값 사용)
+            title (str): 영상 제목.
+            description (str): 영상 설명.
+            transcript (Optional[str]): 자막 텍스트.
+            max_claims (Optional[int]): 최대 추출 개수 (None이면 Config 기본값 사용).
 
         Returns:
-            추출된 Claim 객체 리스트
+            List[Claim]: 추출된 Claim 객체 리스트.
         """
         try:
-            llm_client = await get_llm_client()
+            # Claim 추출은 복잡한 추론보다는 정보 추출이므로 mini 모델 사용 (속도/비용 최적화)
+            from ..shared.llm_client import LLMClient
+            llm_client = LLMClient(model="gpt-4o-mini")
             max_count = max_claims if max_claims is not None else self.max_claims
 
-            # LLM으로 주장 추출
-            raw_claims = await llm_client.extract_claims(
+            # 스크립트가 너무 길면 앞부분만 사용 (토큰 제한)
+            script_text = ""
+            if transcript:
+                max_script_length = 50000  # 약 12.5k 토큰 (GPT-4o는 충분히 처리 가능)
+                if len(transcript) > max_script_length:
+                    script_text = transcript[:max_script_length] + "...(중략)"
+                else:
+                    script_text = transcript
+            else:
+                script_text = "자막 없음"
+
+            prompt = get_claim_extraction_prompt(
                 title=title,
                 description=description,
-                comments=comments,
-                transcript=transcript,
+                script_text=script_text,
                 max_claims=max_count
             )
+
+            messages = [{"role": "user", "content": prompt}]
+            result = await llm_client.chat_completion_json(messages)
+            raw_claims = result.get('claims', [])
 
             # Claim 객체로 변환
             claims = []
@@ -74,10 +88,10 @@ class ClaimExtractor:
         LLM 응답을 Claim 객체로 변환합니다.
 
         Args:
-            raw_claim: LLM이 추출한 주장 딕셔너리
+            raw_claim (Dict[str, Any]): LLM이 추출한 주장 딕셔너리.
 
         Returns:
-            구조화된 Claim 객체, 실패 시 None
+            Optional[Claim]: 구조화된 Claim 객체. 실패 시 None.
         """
         try:
             return Claim(
@@ -95,11 +109,11 @@ class ClaimExtractor:
         주장을 중요도 기준으로 필터링합니다.
 
         Args:
-            claims: 주장 목록
-            min_importance: 최소 중요도 ("high", "medium", "low")
+            claims (List[Claim]): 주장 목록.
+            min_importance (str): 최소 중요도 ("high", "medium", "low").
 
         Returns:
-            필터링된 주장 목록
+            List[Claim]: 필터링된 주장 목록.
         """
         importance_order = {"high": 3, "medium": 2, "low": 1}
         min_level = importance_order.get(min_importance, 2)
@@ -119,10 +133,10 @@ class ClaimExtractor:
         단어 집합의 70% 이상이 겹치면 중복으로 간주합니다.
 
         Args:
-            claims: 주장 목록
+            claims (List[Claim]): 주장 목록.
 
         Returns:
-            중복 제거된 주장 목록
+            List[Claim]: 중복 제거된 주장 목록.
         """
         if not claims:
             return []
@@ -150,7 +164,6 @@ class ClaimExtractor:
 async def extract_claims_from_video(
     title: str,
     description: str,
-    comments: List[str],
     transcript: str = None,
     max_claims: int = None
 ) -> List[Claim]:
@@ -160,17 +173,16 @@ async def extract_claims_from_video(
     중요도 필터링(medium 이상)과 중복 제거를 자동으로 수행합니다.
 
     Args:
-        title: 영상 제목
-        description: 영상 설명
-        comments: 댓글 목록
-        transcript: 자막 (선택)
-        max_claims: 최대 주장 수 (선택)
+        title (str): 영상 제목.
+        description (str): 영상 설명.
+        transcript (Optional[str]): 자막.
+        max_claims (Optional[int]): 최대 주장 수.
 
     Returns:
-        필터링되고 중복 제거된 Claim 객체 리스트
+        List[Claim]: 필터링되고 중복 제거된 Claim 객체 리스트.
     """
     extractor = ClaimExtractor()
-    claims = await extractor.extract_claims(title, description, comments, transcript, max_claims)
+    claims = await extractor.extract_claims(title, description, transcript, max_claims)
 
     # 중요도 필터링 및 중복 제거
     claims = extractor.filter_by_importance(claims, min_importance="medium")

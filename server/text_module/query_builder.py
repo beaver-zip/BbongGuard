@@ -1,8 +1,9 @@
 """검색 쿼리 생성 (LLM 기반 최적화)"""
 
 import logging
-from ..shared.rag_models import Claim
+from ..shared.text_module import Claim
 from ..shared.llm_client import get_llm_client
+from ..resources.prompts import get_query_builder_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -15,26 +16,19 @@ class QueryBuilder:
     async def build_search_query(self, claim: Claim) -> str:
         """
         LLM을 사용하여 주장에서 핵심 키워드를 추출, 검색 쿼리를 생성합니다.
+
+        Args:
+            claim (Claim): 검색 쿼리를 생성할 주장 객체.
+
+        Returns:
+            str: 생성된 검색 쿼리 문자열.
         """
         try:
-            llm = await get_llm_client()
+            # 쿼리 생성은 단순 변환 작업이므로 mini 모델 사용
+            from ..shared.llm_client import LLMClient
+            llm = LLMClient(model="gpt-4o-mini")
             
-            prompt = f"""
-            당신은 검색 엔진 최적화(SEO) 전문가입니다. 
-            다음 주장(Claim)을 검증하기 위해, 구글/네이버 등에서 가장 정확한 검색 결과를 얻을 수 있는 '검색 쿼리'를 작성하세요.
-
-            [주장]
-            "{claim.claim_text}"
-
-            [규칙]
-            1. 불필요한 조사나 서술어는 제거하고, **핵심 키워드(Entity)** 위주로 구성하세요.
-            2. 주장의 시점이나 고유명사가 있다면 반드시 포함하세요.
-            3. 쿼리는 한 줄의 문자열로만 반환하세요. (따옴표 없이)
-            
-            예시:
-            주장: "어제 손흥민이 해트트릭을 기록했다."
-            쿼리: 손흥민 해트트릭 경기 결과 골 모음
-            """
+            prompt = get_query_builder_prompt(claim.claim_text)
             
             messages = [{"role": "user", "content": prompt}]
             query = await llm.chat_completion(messages)

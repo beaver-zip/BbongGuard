@@ -12,13 +12,13 @@ import requests
 import asyncio
 import yt_dlp
 import tempfile
-from typing import List, Dict, Any, Optional
+from typing import Optional
 
-from ..shared.schemas import Claim, VideoMeta
 from ..shared.logger_utils import log_execution
 from .schemas import AudioAnalysisRequest, AudioModuleResult, ClaimVerdict
 from ..shared.llm_client import get_llm_client
 from ..config import Config
+from ..resources.prompts import get_audio_fishing_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -51,23 +51,22 @@ class AudioAnalyzer:
         transcript = ""
         
         try:
-            # 1. 오디오 다운로드 (yt-dlp)
-            video_url = f"https://www.youtube.com/watch?v={request.video_id}"
-            temp_audio_path = await asyncio.to_thread(self._download_audio, video_url)
-            
-            if not temp_audio_path:
-                summary = "오디오 파일을 다운로드할 수 없습니다."
+            # 1. 오디오 다운로드 및 STT
+            # 만약 요청에 이미 transcript가 있다면 재활용 (비용 절감)
+            if request.transcript:
+                logger.info("기존 Transcript 재활용 (STT 건너뜀)")
+                transcript = request.transcript
             else:
-                # 2. Naver Clova Speech로 텍스트 변환 (STT)
-                transcript = await asyncio.to_thread(self._transcribe_audio, temp_audio_path)
-                
-                if not transcript:
-                    summary = "오디오에서 목소리를 감지하지 못했거나 API 호출에 실패했습니다."
-                else:
-                    # 3. 제목 낚시 및 주제 이탈 분석 (LLM)
-                    video_title = getattr(request, 'title', '제목 미상') 
-                    analysis_result = await self._detect_fishing(video_title, transcript)
-                    summary = analysis_result
+                transcript = await self._get_transcript(request.video_id)
+            
+            if not transcript:
+                summary = "오디오 분석 실패 (다운로드 또는 STT 오류)"
+            else:
+                # 2. 제목 낚시 및 주제 이탈 분석 (LLM)
+                video_title = getattr(request, 'title', '제목 미상')
+                video_description = getattr(request, 'description', '')
+                analysis_result = await self._detect_fishing(video_title, video_description, transcript)
+                summary = analysis_result
 
             # 4. 결과 매핑
             audio_claims = []
@@ -89,6 +88,7 @@ class AudioAnalyzer:
                 claims=audio_claims,
                 processing_time_ms=processing_time,
                 status="success",
+                transcript=transcript
             )
 
         except Exception as e:
@@ -103,11 +103,39 @@ class AudioAnalyzer:
                 error_message=str(e)
             )
         finally:
+            pass
+
+    async def transcribe_video(self, video_id: str) -> str:
+        """
+        지정된 video_id의 오디오를 다운로드하고 STT를 수행하여 텍스트를 반환합니다.
+        """
+        return await self._get_transcript(video_id)
+
+    async def _get_transcript(self, video_id: str) -> str:
+        """
+        오디오 다운로드 -> STT 변환
+        """
+        temp_audio_path = None
+        try:
+            video_url = f"https://www.youtube.com/watch?v={video_id}"
+            temp_audio_path = await asyncio.to_thread(self._download_audio, video_url)
+
+            if not temp_audio_path:
+                logger.error("오디오 다운로드 실패")
+                return ""
+
+            transcript = await asyncio.to_thread(self._transcribe_audio, temp_audio_path)
+            return transcript
+
+        except Exception as e:
+            logger.error(f"Transcript 생성 중 오류: {e}", exc_info=True)
+            return ""
+        finally:
             if temp_audio_path and os.path.exists(temp_audio_path):
                 try:
                     os.remove(temp_audio_path)
-                except:
-                    pass
+                except Exception as e:
+                    logger.warning(f"임시 오디오 파일 삭제 실패: {e}")
 
     def _download_audio(self, video_url: str) -> Optional[str]:
         """yt-dlp를 사용하여 오디오 다운로드 (m4a/mp3)"""
@@ -190,29 +218,13 @@ class AudioAnalyzer:
             logger.error(f"Transcribe Failed: {e}")
             return ""
 
-    async def _detect_fishing(self, title: str, transcript: str) -> str:
-        """LLM을 사용하여 제목과 스크립트 내용의 일치 여부 분석"""
+    async def _detect_fishing(self, title: str, description: str, transcript: str) -> str:
+        """LLM을 사용하여 제목/설명과 스크립트 내용의 일치 여부 분석"""
         try:
             llm = await get_llm_client()
             transcript_preview = transcript[:3000] + "..." if len(transcript) > 3000 else transcript
             
-            prompt = f"""
-            당신은 뉴스 기사 및 영상 분석 전문가입니다.
-            다음 유튜브 영상의 '제목'과 실제 '오디오 내용(스크립트)'을 비교하여, 제목이 내용을 왜곡하거나 과장하는 '낚시성(Clickbait)'인지 판별해주세요.
-
-            [영상 제목]
-            {title}
-
-            [오디오 내용]
-            {transcript_preview}
-
-            분석 가이드:
-            1. **사실 일치 여부**: 제목에서 주장하는 핵심 사건이 실제 내용에 포함되어 있습니까?
-            2. **주제 이탈 여부**: 제목은 심각한데 내용은 가벼운 잡담이거나 전혀 다른 주제입니까?
-            3. **결론 도출**: 위 분석을 바탕으로 이 영상이 '정상적인 정보 전달'인지, '낚시성/허위 콘텐츠'인지 명확히 결론을 내려주세요.
-
-            한 문장으로 요약해서 답변하세요.
-            """
+            prompt = get_audio_fishing_prompt(title, description, transcript_preview)
             
             messages = [{"role": "user", "content": prompt}]
             response = await llm.chat_completion(messages)

@@ -4,7 +4,8 @@ from ..shared.schemas import Claim
 
 class ImageAnalysisRequest(BaseModel):
     video_id: str
-    claims: List[Claim]
+    claims: List[Claim] = []
+    title: str = ""
 
 class ClaimVerdict(BaseModel):
     claim_id: str
@@ -18,6 +19,8 @@ class ImageModuleResult(BaseModel):
     video_id: str
     analysis_summary: str
     claims: List[ClaimVerdict]
+    frames: List[Dict[str, Any]] = []
     processing_time_ms: float
     status: str
+    overall_contradiction_score: float = 0.0
     error_message: Optional[str] = None

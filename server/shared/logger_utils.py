@@ -6,7 +6,7 @@ import os
 import functools
 import time
 from datetime import datetime
-from typing import Any, Callable
+from typing import Callable
 import inspect
 
 # 로거 설정
@@ -29,10 +29,13 @@ def _json_serializable(obj):
 def log_execution(module_name: str, step_name: str):
     """
     함수 실행의 입력, 출력, 소요 시간을 JSON 파일로 로깅하는 데코레이터
-    
+
     Args:
-        module_name: 모듈 이름 (text, image, audio, main 등)
-        step_name: 단계 이름 (extract, analyze, summarize 등)
+        module_name (str): 모듈 이름 (예: text, image, audio).
+        step_name (str): 단계 이름 (예: extract, analyze).
+
+    Returns:
+        Callable: 데코레이터 함수.
     """
     def decorator(func: Callable):
         @functools.wraps(func)

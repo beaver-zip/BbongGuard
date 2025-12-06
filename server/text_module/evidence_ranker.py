@@ -8,7 +8,7 @@ import numpy as np
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
-from ..shared.rag_models import Claim, Evidence
+from ..shared.text_module import Claim, Evidence
 from ..config import Config
 
 logger = logging.getLogger(__name__)
@@ -35,10 +35,10 @@ class EvidenceRanker:
         지수 감쇠를 사용하여 최근 콘텐츠일수록 높은 점수를 부여합니다.
 
         Args:
-            published_date: ISO 형식의 발행일 문자열
+            published_date (str): ISO 형식의 발행일 문자열.
 
         Returns:
-            0~1 범위의 최신성 점수, 날짜 없으면 0.7
+            float: 0~1 범위의 최신성 점수. 날짜가 없으면 0.7 반환.
         """
         if not published_date:
             return 0.7
@@ -66,16 +66,16 @@ class EvidenceRanker:
         """
         관련성, 신뢰도, 최신성 점수를 가중 평균하여 최종 점수를 계산합니다.
 
-        기본 가중치: 관련성 40%, 신뢰도 40%, 최신성 20%
+        기본 가중치: 관련성 40%, 신뢰도 40%, 최신성 20%.
 
         Args:
-            relevance_score: 주장과의 관련성 점수 (0~1)
-            domain_score: 출처 도메인 신뢰도 (0~1)
-            recency_score: 최신성 점수 (0~1)
-            weights: 커스텀 가중치 딕셔너리 (선택)
+            relevance_score (float): 주장과의 관련성 점수 (0~1).
+            domain_score (float): 출처 도메인 신뢰도 (0~1).
+            recency_score (float): 최신성 점수 (0~1).
+            weights (Optional[Dict[str, float]]): 커스텀 가중치 딕셔너리.
 
         Returns:
-            0~1 범위의 종합 점수
+            float: 0~1 범위의 종합 점수.
         """
         if weights is None:
             weights = {
@@ -103,11 +103,11 @@ class EvidenceRanker:
         임베딩 모델을 사용하여 주장과 증거 간의 의미적 유사도를 계산합니다.
 
         Args:
-            claim: 순위를 매길 대상 주장
-            evidence_list: 순위를 매길 증거 딕셔너리 리스트
+            claim (Claim): 순위를 매길 대상 주장.
+            evidence_list (List[Dict[str, Any]]): 순위를 매길 증거 딕셔너리 리스트.
 
         Returns:
-            종합 점수 기준으로 정렬된 Evidence 객체 리스트
+            List[Evidence]: 종합 점수 기준으로 정렬된 Evidence 객체 리스트.
         """
         if not evidence_list:
             logger.warning("Evidence가 없습니다")
@@ -170,11 +170,11 @@ class EvidenceRanker:
         순위가 매겨진 증거 중 상위 K개를 선택합니다.
 
         Args:
-            ranked_evidence: 순위가 매겨진 증거 리스트
-            top_k: 선택할 개수 (None이면 Config 기본값)
+            ranked_evidence (List[Evidence]): 순위가 매겨진 증거 리스트.
+            top_k (Optional[int]): 선택할 개수 (None이면 Config 기본값).
 
         Returns:
-            상위 K개 증거 리스트
+            List[Evidence]: 상위 K개 증거 리스트.
         """
         k = top_k if top_k is not None else self.top_k
         selected = ranked_evidence[:k]
@@ -192,12 +192,12 @@ class EvidenceRanker:
         증거 순위 매김과 상위 K개 선택을 한 번에 수행합니다.
 
         Args:
-            claim: 대상 주장
-            evidence_list: 증거 딕셔너리 리스트
-            top_k: 선택할 개수 (선택)
+            claim (Claim): 대상 주장.
+            evidence_list (List[Dict[str, Any]]): 증거 딕셔너리 리스트.
+            top_k (Optional[int]): 선택할 개수.
 
         Returns:
-            상위 K개 증거 객체 리스트
+            List[Evidence]: 상위 K개 증거 객체 리스트.
         """
         ranked = await self.rank_evidence(claim, evidence_list)
         selected = self.select_top_evidence(ranked, top_k)
