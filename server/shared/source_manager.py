@@ -49,60 +49,7 @@ class SourceManager:
             return []
 
     def _get_all_white_domains(self) -> List[str]:
-        """모든 화이트리스트 도메인 목록"""
-        domains = []
-"""
-출처 신뢰도 관리 시스템
-화이트리스트/블랙리스트 기반 도메인 신뢰도 평가
-"""
-
-import json
-import logging
-from typing import Dict, List, Optional, Tuple
-from urllib.parse import urlparse
-import re
-
-from ..config import Config
-
-logger = logging.getLogger(__name__)
-
-
-class SourceManager:
-    """출처 신뢰도 관리자"""
-
-    def __init__(self):
-        """화이트리스트 및 블랙리스트 로드"""
-        self.whitelist = self._load_whitelist()
-        self.blacklist = self._load_blacklist()
-        logger.info(f"SourceManager 초기화 완료 - 화이트리스트 {len(self._get_all_white_domains())}개, 블랙리스트 {len(self.blacklist)}개")
-
-    def _load_whitelist(self) -> Dict:
-        """화이트리스트 JSON 로드"""
-        try:
-            with open(Config.WHITELIST_PATH, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except FileNotFoundError:
-            logger.error(f"화이트리스트 파일을 찾을 수 없습니다: {Config.WHITELIST_PATH}")
-            return {}
-        except json.JSONDecodeError as e:
-            logger.error(f"화이트리스트 JSON 파싱 오류: {e}")
-            return {}
-
-    def _load_blacklist(self) -> List[str]:
-        """블랙리스트 JSON 로드"""
-        try:
-            with open(Config.BLACKLIST_PATH, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                return data.get('domains', [])
-        except FileNotFoundError:
-            logger.error(f"블랙리스트 파일을 찾을 수 없습니다: {Config.BLACKLIST_PATH}")
-            return []
-        except json.JSONDecodeError as e:
-            logger.error(f"블랙리스트 JSON 파싱 오류: {e}")
-            return []
-
-    def _get_all_white_domains(self) -> List[str]:
-        """모든 화이트리스트 도메인 목록"""
+        """모든 화이트리스트 도메인 목록 반환."""
         domains = []
         for tier_info in self.whitelist.values():
             if isinstance(tier_info, dict) and 'domains' in tier_info:

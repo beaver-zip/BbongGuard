@@ -15,25 +15,12 @@ class YouTubeClient:
     """YouTube Data API v3 클라이언트"""
 
     def __init__(self):
-        """YouTube API 클라이언트 초기화"""
-"""YouTube Data API v3 클라이언트"""
+        """
+        YouTube API 클라이언트 초기화.
 
-import logging
-import re
-from typing import Dict, List, Optional
-from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
-
-from ..config import Config
-
-logger = logging.getLogger(__name__)
-
-
-class YouTubeClient:
-    """YouTube Data API v3 클라이언트"""
-
-    def __init__(self):
-        """YouTube API 클라이언트 초기화"""
+        Raises:
+            ValueError: YOUTUBE_API_KEY가 설정되지 않은 경우.
+        """
         if not Config.YOUTUBE_API_KEY:
             raise ValueError("YOUTUBE_API_KEY가 설정되지 않았습니다")
 
