@@ -19,7 +19,6 @@ google-api-python-client>=2.0.0
 # RAG 시스템 의존성
 openai>=1.12.0           # OpenAI GPT-4o API
 tavily-python>=0.3.0     # Tavily 웹 검색 API
-chromadb>=0.4.22         # 벡터 데이터베이스
 sentence-transformers>=2.3.0  # 텍스트 임베딩
 
 # 멀티모달 (이미지/오디오) 처리
