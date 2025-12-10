@@ -19,7 +19,12 @@ class WebSearcher:
     """Tavily API를 사용하여 주장을 검증할 웹 증거를 검색하는 클래스"""
 
     def __init__(self):
-        """WebSearcher를 초기화합니다."""
+        """
+        WebSearcher 초기화.
+
+        Raises:
+            ValueError: TAVILY_API_KEY가 설정되지 않은 경우.
+        """
         if not Config.TAVILY_API_KEY:
             raise ValueError("TAVILY_API_KEY가 설정되지 않았습니다")
 
@@ -32,13 +37,16 @@ class WebSearcher:
 
     async def search_claim(self, claim: Claim) -> List[Dict[str, Any]]:
         """
-        주장에 대해 Tavily 웹 검색을 수행합니다.
+        주장에 대해 Tavily 웹 검색 수행.
 
         Args:
             claim (Claim): 검색할 주장.
 
         Returns:
-            List[Dict[str, Any]]: 검색 결과 리스트.
+            List[Dict[str, Any]]: 검색 결과 리스트 (title, url, content 등).
+
+        Raises:
+            Exception: Tavily API 호출 실패 시 빈 리스트 반환.
         """
         try:
             query = await self.query_builder.build_search_query(claim)
@@ -63,6 +71,39 @@ class WebSearcher:
         except Exception as e:
             logger.error(f"웹 검색 실패: {e}", exc_info=True)
             return []
+
+    def extract_date_from_url(self, url: str) -> str:
+        """
+        URL에서 날짜 정보 추출.
+
+        지원 형식: YYYY/MM/DD, YYYY-MM-DD, YYYY.MM.DD, YYYYMMDD (8자리).
+
+        Args:
+            url (str): 분석할 URL.
+
+        Returns:
+            str: YYYY-MM-DD 형식의 날짜 문자열. 추출 실패 시 빈 문자열.
+        """
+        import re
+        try:
+            # 1. YYYY-MM-DD or YYYY/MM/DD or YYYY.MM.DD
+            # \d{4} 뒤에 [/-.] 구분자, 그 뒤에 \d{2} [/-.] \d{2}
+            match = re.search(r'(\d{4})[/\.-](\d{2})[/\.-](\d{2})', url)
+            if match:
+                return f"{match.group(1)}-{match.group(2)}-{match.group(3)}"
+
+            # 2. 8자리 숫자 (2020~2029년) - Daum 뉴스 등 (/v/20240924... or just /20240924)
+            # 20으로 시작하는 8자리 숫자 검색
+            match = re.search(r'(20\d{2})(\d{2})(\d{2})', url)
+            if match:
+                year, month, day = match.group(1), match.group(2), match.group(3)
+                # 월/일 유효성 간단 체크
+                if 1 <= int(month) <= 12 and 1 <= int(day) <= 31:
+                    return f"{year}-{month}-{day}"
+            
+            return ""
+        except Exception:
+            return ""
 
     def filter_and_format_results(
         self,
@@ -98,13 +139,18 @@ class WebSearcher:
                 logger.debug(f"신뢰도 미달 ({domain_score:.2f}): {url}")
                 continue
 
+            # 날짜 추출 (API 응답 없으면 URL에서 시도)
+            published_date = result.get('published_date')
+            if not published_date:
+                published_date = self.extract_date_from_url(url)
+
             # Evidence 형식으로 변환
             evidence = {
                 'source_title': result.get('title', 'Unknown'),
                 'source_url': url,
                 'domain': self.source_manager.extract_domain(url),
                 'snippet': result.get('content', '')[:500],
-                'published_date': result.get('published_date') or '',
+                'published_date': published_date,
                 'domain_score': domain_score,
                 'relevance_score': result.get('score', 0.5),
                 'recency_score': 1.0
@@ -157,8 +203,8 @@ class WebSearcher:
             try:
                 evidence_date = dateparser.parse(evidence_date_str)
                 if evidence_date:
-                    time_difference = abs((video_published_at - evidence_date).days)
-                    evidence['date_diff_days'] = time_difference
+                    # 영상 게시일과의 날짜 차이 절댓값
+                    evidence['date_diff_days'] = abs((video_published_at - evidence_date).days)
                 else:
                     evidence['date_diff_days'] = 3650
             except Exception:
