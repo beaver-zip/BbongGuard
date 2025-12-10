@@ -36,5 +36,3 @@ openai-whisper>=20231117 # 음성 인식 (자막 추출)
 
 # Google Cloud Vision API
 google-cloud-vision>=3.4.0
-requests>=2.31.0
-dateparser
