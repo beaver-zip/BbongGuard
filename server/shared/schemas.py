@@ -27,6 +27,7 @@ class VideoMeta(BaseModel):
     language: str = Field("ko", description="영상 언어 코드")
     has_official_captions: bool = Field(False, description="공식 자막 존재 여부")
     transcript: Optional[List[Dict[str, Any]]] = Field(default=None, description="자막 리스트 [{'text':..., 'start':..., 'end':...}]")
+    published_at: Optional[str] = Field(None, description="영상 게시일 (ISO format)")
 
 class FrameFeature(BaseModel):
     """
