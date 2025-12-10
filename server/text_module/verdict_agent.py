@@ -3,6 +3,8 @@
 import logging
 from typing import List, Dict, Any
 import time
+from datetime import datetime
+import dateparser
 
 from ..shared.schemas import Claim, VideoMeta
 from ..shared.text_module import Evidence, ClaimVerdict
@@ -18,7 +20,9 @@ class VerdictAgent:
     """LLM을 사용하여 증거 기반으로 주장의 진위를 판정하고 멀티모달 결과를 통합하는 클래스"""
 
     def __init__(self):
-        """VerdictAgent를 초기화합니다."""
+        """
+        VerdictAgent 초기화.
+        """
         logger.info("VerdictAgent 초기화")
 
     async def judge_claim(
@@ -68,12 +72,20 @@ class VerdictAgent:
             
             result = await llm_client.chat_completion_json(messages)
             
-            verdict_status = result.get('verdict_status', 'insufficient_evidence')
-            # 유효성 검사
-            if verdict_status not in ["verified_true", "verified_false", "insufficient_evidence"]:
+            # Verdict Status 정규화 (대소문자/공백/부분일치 허용)
+            raw_status = result.get('verdict_status', 'insufficient_evidence').strip().lower()
+            
+            if "true" in raw_status:
+                verdict_status = "verified_true"
+            elif "false" in raw_status:
+                verdict_status = "verified_false"
+            else:
                 verdict_status = "insufficient_evidence"
             
             reason = result.get('reason', '판정 이유 없음')
+            # 상세 이유가 없는 경우 보완
+            if verdict_status == 'insufficient_evidence' and reason == '판정 이유 없음':
+                 reason = "증거 부족으로 판단이 불가능합니다."
 
             is_fake = (verdict_status == "verified_false")
             
@@ -81,10 +93,11 @@ class VerdictAgent:
                 claim_id=claim.claim_id,
                 claim_text=claim.claim_text,
                 category=claim.category,
+                verdict_status=verdict_status,
                 is_fake=is_fake,
                 verdict_reason=reason,
                 evidence=evidence_list,
-                processing_time_ms=0 # 상위에서 계산
+                processing_time_ms=0
             )
 
         except Exception as e:
@@ -110,8 +123,7 @@ class VerdictAgent:
         audio_results: Dict[str, Any]
     ) -> FinalVerdict:
         """
-        텍스트, 이미지, 오디오 분석 결과를 종합하여 최종 판단을 내립니다.
-        (자극성 및 감정적 선동 여부 반영)
+        텍스트, 이미지, 오디오 분석 결과를 종합하여 최종 판단.
 
         Args:
             video_meta (VideoMeta): 영상 메타데이터.
@@ -122,6 +134,9 @@ class VerdictAgent:
 
         Returns:
             FinalVerdict: 종합 판정 결과.
+
+        Raises:
+            Exception: LLM 호출 실패 시 기본값 반환.
         """
         try:
             llm_client = await get_llm_client()
@@ -155,7 +170,8 @@ class VerdictAgent:
                                 text_sources_info.append({
                                     "reason": t_reason,
                                     "title": ev.source_title,
-                                    "url": ev.source_url
+                                    "url": ev.source_url,
+                                    "published_date": ev.published_date
                                 })
                 
                 # 이미지 결과 (자극성)
@@ -184,6 +200,39 @@ Claim {i}: "{claim.claim_text}"
 - 오디오(선동성): {aud_summary}
 --------------------------------------------------
 """
+
+            # 출처 정렬: 영상 게시일 기준 근접순
+            target_date = datetime.now() # 기본값
+            if video_meta.published_at:
+                try:
+                    parsed = dateparser.parse(video_meta.published_at)
+                    if parsed:
+                        target_date = parsed
+                except:
+                    pass
+            
+            # timezone 제거 (비교를 위해)
+            if target_date.tzinfo:
+                target_date = target_date.replace(tzinfo=None)
+
+            def calculate_date_diff(source):
+                date_str = source.get('published_date')
+                if not date_str:
+                    return 36500 # 날짜 없으면 최하위
+                
+                try:
+                    pub_date = dateparser.parse(date_str)
+                    if not pub_date:
+                        return 36500
+                    
+                    if pub_date.tzinfo:
+                        pub_date = pub_date.replace(tzinfo=None)
+                        
+                    return abs((target_date - pub_date).days)
+                except:
+                    return 36500
+            
+            text_sources_info.sort(key=calculate_date_diff)  # 영상 게시일과 차이가 작은 순
 
             # 2. LLM 종합 판단 요청
             prompt = get_verdict_agent_prompt(video_meta, claims_summary)
