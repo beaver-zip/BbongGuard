@@ -68,6 +68,15 @@ class ClaimExtractor:
             messages = [{"role": "user", "content": prompt}]
             result = await llm_client.chat_completion_json(messages)
             raw_claims = result.get('claims', [])
+            video_category = result.get('video_category', 'info')
+
+            logger.info(f"영상 카테고리 분석 결과: {video_category}")
+            
+            # 비정보성 카테고리 필터링
+            non_info_categories = ["entertainment", "humor", "daily", "other"]
+            if video_category in non_info_categories:
+                logger.info("비정보성 영상으로 판단되어 주장을 추출하지 않습니다.")
+                return []
 
             # Claim 객체로 변환
             claims = []

@@ -80,8 +80,8 @@ class EvidenceRanker:
         if weights is None:
             weights = {
                 'relevance': 0.4,
-                'domain': 0.4,
-                'recency': 0.2
+                'domain': 0.2,
+                'recency': 0.4  # 영상 게시일 기준 날짜 근접성
             }
 
         score = (
@@ -134,7 +134,15 @@ class EvidenceRanker:
             for i, ev in enumerate(evidence_list):
                 relevance_score = float(np.clip(similarities[i], 0.0, 1.0))
                 domain_score = ev.get('domain_score', 0.5)
-                recency_score = self.calculate_recency_score(ev.get('published_date'))
+                
+                # date_diff_days가 있으면 영상 게시일 기준 점수 사용 (rerank_by_date에서 계산됨)
+                date_diff_days = ev.get('date_diff_days')
+                
+                if date_diff_days is not None:
+                    # 날짜 차이 절댓값 기반 점수 (지수 감쇠, 30일 반감기)
+                    recency_score = math.exp(-date_diff_days / 30)
+                else:
+                    recency_score = self.calculate_recency_score(ev.get('published_date'))
 
                 combined_score = self.calculate_combined_score(
                     relevance_score, domain_score, recency_score
@@ -148,13 +156,30 @@ class EvidenceRanker:
                     published_date=ev.get('published_date')
                 )
 
-                scored_evidence.append((evidence, combined_score))
+                scored_evidence.append({
+                    'evidence': evidence,
+                    'combined_score': combined_score,
+                    'date_diff_days': date_diff_days if date_diff_days is not None else 3650,
+                    'recency_score': recency_score,
+                    'relevance_score': relevance_score,
+                    'domain_score': domain_score
+                })
 
-            # 점수 순 정렬
-            scored_evidence.sort(key=lambda x: x[1], reverse=True)
-            ranked_evidence = [ev for ev, score in scored_evidence]
-
+            # 정렬: (1) date_diff_days 낮은 순 (2) combined_score 높은 순
+            scored_evidence.sort(
+                key=lambda x: (x['date_diff_days'], -x['combined_score'])
+            )
+            
+            ranked_evidence = [item['evidence'] for item in scored_evidence]
+            
+            # 정렬 결과 로깅
             logger.info(f"Evidence 순위 매김 완료: {len(ranked_evidence)}개")
+            for idx, item in enumerate(scored_evidence[:5]):  # 상위 5개만 로그
+                logger.info(
+                    f"  #{idx+1}: {item['evidence'].source_title[:40]} | "
+                    f"diff={item['date_diff_days']}일 | "
+                    f"combined={item['combined_score']:.3f}"
+                )
             return ranked_evidence
 
         except Exception as e:
