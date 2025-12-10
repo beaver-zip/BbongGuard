@@ -11,7 +11,7 @@ def get_verdict_agent_prompt(video_meta, claims_summary):
 {claims_summary}
 
 판단 가이드:
-1. **핵심 기준 (Priority)**: '텍스트 팩트체크' 결과가 가장 중요합니다. 텍스트 분석에서 '거짓(Fake)'으로 판명된 주장이 있다면, 영상 전체를 '가짜뉴스'로 판단해야 합니다.
+1. **핵심 기준 (Priority)**: '텍스트 팩트체크' 결과가 가장 중요합니다. 단편적인 오류보다는 영상의 전체적인 맥락과 의도를 고려하여 종합적으로 판단하세요. 일부 주장이 거짓이라도 전체적인 메시지가 사실에 기반한다면 등급 조정이 가능합니다.
 2. **보조 기준 (Support)**: '이미지'와 '오디오' 분석 결과는 썸네일 낚시(Clickbait)나 감정적 선동 여부를 판단하는 보조 자료로만 활용하세요. 팩트 여부와 관계없이 자극적인 요소가 있다면 '주의'를 요하는 근거로 추가하세요.
 3. **종합 판단**: 텍스트 팩트체크 결과를 중심으로 결론을 내리고, 이미지/오디오 분석 결과를 덧붙여 설명하세요.
 
@@ -89,10 +89,11 @@ def get_claim_extraction_prompt(title, description, script_text, max_claims):
 1. **검증 가치**: 단순한 사실 나열보다는, 논란의 여지가 있거나 대중에게 잘못된 정보를 줄 수 있는 주장을 우선하세요.
 2. **구체성**: "경제가 나쁘다" 같은 모호한 주장보다는 "2023년 경제성장률이 -1%다" 같은 구체적인 수치/사건이 포함된 주장을 추출하세요.
 3. **핵심 내용**: 영상의 핵심 주제와 관련된 주장을 우선하세요.
-4. 중요도 높은 순서로 최대 {max_claims}개
+4. **영상 카테고리 분류**: 이 영상이 '뉴스/시사/정보' 카테고리에 속하는지, 아니면 '예능/유머/일상/기타' 카테고리에 속하는지 분류하세요.
 
 출력 형식 (JSON):
 {{
+  "video_category": "news|info|entertainment|humor|daily|other",
   "claims": [
     {{
       "claim": "구체적인 주장 내용 (주어와 술어가 명확한 완결된 문장)",
@@ -114,8 +115,11 @@ def get_claim_judgment_prompt(claim, evidence_text):
 
 판단 기준:
 1. 증거가 주장을 뒷받침하면 → verdict_status: "verified_true"
-2. 증거가 주장을 반박하면 → verdict_status: "verified_false"  
-3. 증거로 판단하기 어려우면 → verdict_status: "insufficient_evidence"
+2. 증거가 주장을 반박하면 → verdict_status: "verified_false"
+3. 증거가 부분적으로 일치하거나, 사소한 차이만 있다면 → verdict_status: "verified_true" (이유에 설명 기재)
+4. 증거로 판단하기 정말 어려운 경우에만 → verdict_status: "insufficient_evidence"
+
+주의: "확인되지 않음" 등의 소극적인 판정보다는, 수집된 증거 내에서 가장 합리적인 결론을 도출하세요.
 
 출력 형식 (JSON):
 {{
