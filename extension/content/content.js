@@ -1,10 +1,20 @@
 // content.js - YouTube 페이지에 주입되는 스크립트
 // YouTube 영상 페이지에서 video ID를 추출하는 역할
 
-// URL에서 YouTube video ID 추출
+// URL에서 YouTube video ID 추출 (일반 영상 + Shorts 지원)
 function getVideoIdFromUrl() {
+  const url = window.location.href;
+  
+  // 일반 영상: youtube.com/watch?v=VIDEO_ID
   const urlParams = new URLSearchParams(window.location.search);
-  return urlParams.get('v');
+  const watchId = urlParams.get('v');
+  if (watchId) return watchId;
+  
+  // Shorts: youtube.com/shorts/VIDEO_ID
+  const shortsMatch = url.match(/youtube\.com\/shorts\/([a-zA-Z0-9_-]+)/);
+  if (shortsMatch) return shortsMatch[1];
+  
+  return null;
 }
 
 // 현재 재생 중인 영상 정보 가져오기 (DOM에서 직접 추출)

@@ -141,19 +141,23 @@ async function getInferenceServerUrl() {
   });
 }
 
-// 추론 서버로 데이터 전송 및 분석 결과 받기
+/**
+ * 추론 서버로 데이터를 전송하고 분석 결과를 스트리밍(NDJSON)으로 수신합니다.
+ * 
+ * @param {Object} videoData - 영상 메타데이터
+ * @returns {Promise<Object>} 분석 결과 객체 (verdict, evidence, details 등)
+ * @throws {Error} 서버 통신 오류 또는 분석 실패 시
+ */
 async function analyzeWithInferenceServer(videoData) {
   try {
     const serverUrl = await getInferenceServerUrl();
     const endpoint = `${serverUrl}/api/analyze-multimodal`;
 
-    // 서버로 전송할 데이터 구조화 (snake_case 적용)
     const payload = {
       video_id: videoData.videoId,
       title: videoData.title,
       description: videoData.description || "",
       duration_sec: videoData.durationSec || 0,
-      // 추가 정보
       channel_title: videoData.channelTitle,
       views: parseInt(videoData.viewCount) || 0,
       thumbnail_url: videoData.thumbnailUrl
@@ -161,9 +165,7 @@ async function analyzeWithInferenceServer(videoData) {
 
     const response = await fetch(endpoint, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
 
@@ -172,32 +174,136 @@ async function analyzeWithInferenceServer(videoData) {
       throw new Error(errorData.detail || errorData.message || `추론 서버 응답 오류 (${response.status})`);
     }
 
-    const result = await response.json();
-    const verdict = result.final_verdict;
+    // Streaming Response 처리 (NDJSON)
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buffer = "";
+    let finalResult = null;
 
-    // 가짜뉴스 확률 매핑
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+
+        // Buffer에서 줄바꿈(\n)을 찾아서 처리하는 방식 (Robust NDJSON parsing)
+        let boundary = buffer.indexOf('\n');
+        
+        while (boundary !== -1) {
+          const chunk = buffer.slice(0, boundary).trim();
+          buffer = buffer.slice(boundary + 1); // 처리된 부분 제거
+
+          if (chunk) {
+            try {
+              const msg = JSON.parse(chunk);
+              
+              if (msg.type === 'progress') {
+                // 팝업에 진행 상황 전달
+                chrome.runtime.sendMessage({
+                  action: 'analysisProgress',
+                  message: msg.message
+                }).catch(() => {});
+                
+                // 진행 상황 storage에도 저장 (팝업 재오픈 시 복원용)
+                const currentState = await getAnalysisState();
+                if (currentState && 
+                    currentState.status === 'analyzing' && 
+                    currentState.videoId === payload.video_id) {
+                  await saveAnalysisState({
+                    ...currentState,
+                    progress: msg.message
+                  });
+                }
+              } else if (msg.type === 'result') {
+                finalResult = msg.data;
+              } else if (msg.type === 'error') {
+                throw new Error(msg.message);
+              }
+            } catch (e) {
+              console.warn('JSON Parse Error:', e, 'Chunk:', chunk);
+              // 치명적이지 않은 파싱 에러는 무시하고 계속 진행
+            }
+          }
+          boundary = buffer.indexOf('\n');
+        }
+      }
+    } catch (streamError) {
+      throw streamError;
+    }
+
+    if (!finalResult) {
+      throw new Error("서버로부터 유효한 분석 결과를 받지 못했습니다.");
+    }
+
+    const verdict = finalResult.final_verdict;
+
     return {
-      verdict: verdict, // 전체 verdict 객체 반환
+      verdict: verdict,
       evidence: verdict.key_evidence && verdict.key_evidence.length > 0 ? verdict.key_evidence : [verdict.overall_reasoning],
       textSources: verdict.text_sources || [],
       details: verdict,
-      text_result: result.text_result // [New] 텍스트 상세 분석 결과 포함
+      text_result: finalResult.text_result 
     };
 
   } catch (error) {
     console.error('추론 서버 통신 실패:', error);
-
     if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
       throw new Error('추론 서버에 연결할 수 없습니다. 서버가 실행 중인지 확인하세요.');
     }
-
     throw error;
   }
 }
 
 
 // ==========================================
-// 4. Main Background Logic
+// 4. Analysis State Management
+// ==========================================
+
+// 분석 상태 저장
+async function saveAnalysisState(state) {
+  await chrome.storage.local.set({ analysisState: state });
+}
+
+// 분석 상태 조회
+async function getAnalysisState() {
+  const result = await chrome.storage.local.get(['analysisState']);
+  return result.analysisState || null;
+}
+
+// 분석 상태 초기화
+async function clearAnalysisState() {
+  await chrome.storage.local.remove(['analysisState']);
+}
+
+// 알림 전송
+function sendNotification(title, message, videoId) {
+  console.log('알림 전송 시도:', { title, message, videoId });
+  
+  try {
+    chrome.notifications.create(
+      `analysis-${videoId}`,
+      {
+        type: 'basic',
+        iconUrl: chrome.runtime.getURL('icons/icon128.png'),
+        title: title,
+        message: message
+      },
+      (notificationId) => {
+        if (chrome.runtime.lastError) {
+          console.error('알림 생성 실패:', chrome.runtime.lastError.message);
+        } else {
+          console.log('알림 생성 성공:', notificationId);
+        }
+      }
+    );
+  } catch (error) {
+    console.error('알림 전송 중 예외 발생:', error);
+  }
+}
+
+// ==========================================
+// 5. Main Background Logic
 // ==========================================
 
 // 메시지 리스너
@@ -209,6 +315,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     return true; // 비동기 응답
   }
+
+  if (request.action === 'getAnalysisState') {
+    getAnalysisState().then(state => sendResponse({ state }));
+    return true;
+  }
+
+  if (request.action === 'clearAnalysisState') {
+    clearAnalysisState().then(() => sendResponse({ success: true }));
+    return true;
+  }
 });
 
 // 영상 분석 메인 함수
@@ -216,19 +332,35 @@ async function handleVideoAnalysis(videoId) {
   try {
     console.log('영상 분석 시작:', videoId);
 
+    // 분석 시작 상태 저장
+    await saveAnalysisState({
+      videoId: videoId,
+      status: 'analyzing',
+      progress: 'YouTube 영상 정보 수집 중...',
+      startedAt: Date.now()
+    });
+
     // 1. YouTube Data API로 영상 정보 수집
     const videoData = await fetchYouTubeData(videoId);
+
+    // 진행 상황 업데이트
+    await saveAnalysisState({
+      videoId: videoId,
+      status: 'analyzing',
+      progress: 'AI 서버에서 분석 중...',
+      videoTitle: videoData.title,
+      startedAt: Date.now()
+    });
 
     // 2. 추론 서버로 데이터 전송
     const inferenceResult = await sendToInferenceServer(videoData);
 
-    // 3. 결과 반환
-    // 3. 결과 반환
-    return {
+    // 3. 결과 구성
+    const result = {
       verdict: inferenceResult.verdict,
       evidence: inferenceResult.evidence,
       textSources: inferenceResult.textSources,
-      text_result: inferenceResult.text_result, // [New] 텍스트 상세 분석 결과 전달
+      text_result: inferenceResult.text_result,
       videoInfo: {
         title: videoData.title,
         channelTitle: videoData.channelTitle,
@@ -237,8 +369,41 @@ async function handleVideoAnalysis(videoId) {
       }
     };
 
+    // 분석 완료 상태 저장
+    await saveAnalysisState({
+      videoId: videoId,
+      status: 'completed',
+      result: result,
+      completedAt: Date.now()
+    });
+
+    // 완료 알림 전송
+    sendNotification(
+      'BbongGuard 분석 완료',
+      `"${videoData.title.substring(0, 30)}..." 분석이 완료되었습니다.`,
+      videoId
+    );
+
+    return result;
+
   } catch (error) {
     console.error('영상 분석 중 오류:', error);
+
+    // 에러 상태 저장
+    await saveAnalysisState({
+      videoId: videoId,
+      status: 'error',
+      error: error.message,
+      errorAt: Date.now()
+    });
+
+    // 에러 알림 전송
+    sendNotification(
+      'BbongGuard 분석 실패',
+      error.message.substring(0, 50),
+      videoId
+    );
+
     throw error;
   }
 }
