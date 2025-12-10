@@ -11,7 +11,7 @@ pip-delete-this-directory.txt
 
 # 환경 변수
 .env
-.env.local
+google_service-account-key.json
 
 # IDE
 .vscode/
@@ -26,41 +26,13 @@ Thumbs.db
 
 # Logs
 *.log
+logs/
 
 # Chrome Extension
 *.pem
 *.crx
 *.zip
 
-# Node modules (if needed later)
-node_modules/
-
 # Build
 dist/
 build/
-
-# AI Models (too large for GitHub)
-server/models/*.h5
-server/models/*.model
-
-# User requested exclusions
-logs/
-test_multimodal.py
-quick_test.py
-BbongGuard_v2/
-
-# Backup directories
-server_old/
-server_backup/
-server_backup_new/
-
-# ChromaDB data
-server/data/chromadb/
-
-# UML diagrams
-UMLdiagrams/
-
-# Excluded files
-google_service-account-key.json
-test_category.py
-test.py
