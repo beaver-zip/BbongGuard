@@ -71,30 +71,15 @@ class TextAnalyzer:
 
             # 1-2단계: 1차 추출 실패 시 STT를 이용한 2차 시도
             if not claims:
-                # ================== STT 디버깅 로그 시작 ==================
-                import os
-                debug_log_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "logs", "stt_debug.log")
-                # 기본 로거를 재설정하지 않도록 핸들러를 직접 추가
-                debug_logger = logging.getLogger('stt_debugger')
-                if not debug_logger.handlers: # 핸들러 중복 추가 방지
-                    debug_logger.setLevel(logging.INFO)
-                    handler = logging.FileHandler(debug_log_path, mode='w', encoding='utf-8')
-                    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-                    handler.setFormatter(formatter)
-                    debug_logger.addHandler(handler)
-                # ========================================================
+                from ..audio_module.audio_analyzer import AudioAnalyzer  # 순환 참조 방지
 
-                from ..audio_module.audio_analyzer import AudioAnalyzer # 순환 참조 방지를 위한 지연 임포트
-                
-                debug_logger.info("1차 주장 추출 실패. STT를 이용한 2차 추출을 시도합니다.")
-                logger.warning("1차 주장 추출 실패. STT를 이용한 2차 추출을 시도합니다.")
+                logger.warning("1차 주장 추출 실패. STT를 이용한 2차 추출 시도")
                 
                 audio_analyzer = AudioAnalyzer()
                 stt_transcript = await audio_analyzer.transcribe_video(request.video_id)
 
                 if stt_transcript:
-                    debug_logger.info(f"STT 성공. Transcript 길이: {len(stt_transcript)}. 2차 주장 추출 실행.")
-                    logger.info("STT 성공. 2차 주장 추출 실행.")
+                    logger.info(f"STT 성공 (길이: {len(stt_transcript)}). 2차 주장 추출 실행")
                     request.transcript = stt_transcript
                     claims = await extract_claims_from_video(
                         title=request.title,
@@ -103,8 +88,7 @@ class TextAnalyzer:
                         max_claims=request.max_claims
                     )
                 else:
-                    debug_logger.error("STT 변환에 실패하여 2차 주장 추출을 건너뜁니다.")
-                    logger.error("STT 변환에 실패하여 2차 주장 추출을 건너뜁니다.")
+                    logger.error("STT 변환 실패. 2차 주장 추출 건너뜀")
 
             if not claims:
                 logger.warning("최종적으로 추출된 주장이 없습니다")
@@ -202,6 +186,40 @@ class TextAnalyzer:
         fake_ratio = fake_count / total_count
         if fake_ratio >= 0.5: return "suspicious"
         else: return "normal"
+
+    def _create_no_claims_result(self, video_id: str, start_time: float) -> TextModuleResult:
+        """추출된 주장이 없을 때 반환할 결과 생성"""
+        return TextModuleResult(
+            modality="text",
+            video_id=video_id,
+            analysis_summary="분석 가능한 주장을 추출할 수 없습니다. 정보성 콘텐츠가 아니거나 자막/설명이 부족합니다.",
+            findings=[],
+            total_findings=0,
+            problematic_findings_count=0,
+            module_assessment="inconclusive",
+            key_concerns=[],
+            processing_time_ms=(time.time() - start_time) * 1000,
+            status="no_claims",
+            claims=[],
+            transcript=None
+        )
+
+    def _create_error_result(self, video_id: str, error_message: str, start_time: float) -> TextModuleResult:
+        """에러 발생 시 반환할 결과 생성"""
+        return TextModuleResult(
+            modality="text",
+            video_id=video_id,
+            analysis_summary=f"분석 중 오류가 발생했습니다: {error_message}",
+            findings=[],
+            total_findings=0,
+            problematic_findings_count=0,
+            module_assessment="error",
+            key_concerns=[],
+            processing_time_ms=(time.time() - start_time) * 1000,
+            status="error",
+            claims=[],
+            transcript=None
+        )
 
     async def _process_single_claim(self, claim: Claim, request: TextAnalysisRequest) -> ClaimVerdict:
         """
